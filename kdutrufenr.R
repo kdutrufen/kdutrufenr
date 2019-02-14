@@ -1,5 +1,25 @@
+library(tidyverse)
 
+plot_genes_boxplot = function(df, genes, design, levels, converter, convert_from, convert_to){
+  df = df %>% cpm %>% as.data.frame %>% rownames_to_column %>% filter(rowname %in% c(genes)) %>% distinct(rowname, .keep_all = TRUE) %>% arrange(rowname) %>% column_to_rownames
+  if (nrow(df)%%4==0){
+    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
+  } else {
+    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
+    df_list[[(length(df_list)+1)]] = df[((length(df_list)*4)+1):length(genes),]
+  }
+  df_list = df_list %>% map(t) %>% map(function(x) as.data.frame(cbind(x, "Condition" = as.character(design, levels = levels)) ) )
+  df_list = df_list %>% map(function(x) { x %>% gather(Gene, CPM, -Condition) } ) %>% map(function(x) { merge(x, converter, by.x = "Gene", by.y = convert_from) } )
+  appender <- function(string, suffix = converter[[convert_to]][match(string, converter[[convert_from]])]) paste0(string, "\n (", suffix,")")
+  map(df_list, function(x) ggplot(x, aes(x = Condition, y = as.numeric(CPM), color = Condition)) + geom_boxplot(alpha = .5) + geom_jitter(alpha = .5,width = .1) + theme_bw() + scale_x_discrete(limits = levels) + scale_fill_discrete(breaks = levels) + theme(axis.text.x = element_text(angle=90, hjust=1)) + ylab(label = "Read counts (cpm)") + facet_wrap(~Gene, scales = "free", ncol = 2, labeller = as_labeller(appender)) )
+}
 
+library(stringr)
+ora_to_df = function(ora = ora){ unclass(ora) %>% attr("ora") %>% as.data.frame}
+filter_ora = function(df = dfa, p.adjust = p.adjust, Count = Count){ df %>% filter(p.adjust<0.05) %>% filter(Count>2) }
+order_ora_genes = function(df = df, geneID = geneID){ df[[geneID]] %>% strsplit(split = "/") %>% map(sort) %>% map(paste, collapse = "/") %>% unlist }
+ora_genes_to_title = function(df = df, geneID = geneID){ ora_df[[geneID]] %>% strsplit(split = "/") %>% map(str_to_title) %>% map(paste, collapse = "/") %>% unlist }
+add_ensembl = function(df = df, geneID = geneID, convert_table = convert_table, from = from, to = to){ df[[geneID]] %>% strsplit(split = "/") %>% map(function(x) as.character( convert_table[[to]][ match( x, convert_table[[from]] ) ] ) ) %>% map(function(x) paste(x, collapse = "/")) %>% unlist }
 
 # plot gsea function from CEMiTool
 setGeneric('plot_gsea', function(cem, ...) {
@@ -250,13 +270,6 @@ plot_ora_single <- function(es, ordr_by='p.adjust', max_length=50, pv_cut=0.05,
   return(res)
 }
 
-library(stringr)
-ora_to_df = function(ora = ora){ unclass(ora) %>% attr("ora") %>% as.data.frame}
-filter_ora = function(df = dfa, p.adjust = p.adjust, Count = Count){ df %>% filter(p.adjust<0.05) %>% filter(Count>2) }
-order_ora_genes = function(df = df, geneID = geneID){ df[[geneID]] %>% strsplit(split = "/") %>% map(sort) %>% map(paste, collapse = "/") %>% unlist }
-ora_genes_to_title = function(df = df, geneID = geneID){ ora_df[[geneID]] %>% strsplit(split = "/") %>% map(str_to_title) %>% map(paste, collapse = "/") %>% unlist }
-add_ensembl = function(df = df, geneID = geneID, convert_table = convert_table, from = from, to = to){ df[[geneID]] %>% strsplit(split = "/") %>% map(function(x) as.character( convert_table[[to]][ match( x, convert_table[[from]] ) ] ) ) %>% map(function(x) paste(x, collapse = "/")) %>% unlist }
-
 # Adding interactions
 setGeneric('plot_interactions', function(cem, ...) {
   standardGeneric('plot_interactions')
@@ -366,27 +379,6 @@ plot_interaction <- function(ig_obj, n, color, name, mod_genes, coexp_hubs){
   return(pl)
 }
 
-
-
-
-
-library(tidyverse)
-
-plot_genes_boxplot = function(df, genes, design, levels, converter, convert_from, convert_to){
-  df = df %>% cpm %>% as.data.frame %>% rownames_to_column %>% filter(rowname %in% c(genes)) %>% distinct(rowname, .keep_all = TRUE) %>% arrange(rowname) %>% column_to_rownames
-  if (nrow(df)%%4==0){
-    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
-  } else {
-    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
-    df_list[[(length(df_list)+1)]] = df[((length(df_list)*4)+1):length(genes),]
-  }
-  df_list = df_list %>% map(t) %>% map(function(x) as.data.frame(cbind(x, "Condition" = as.character(design, levels = levels)) ) )
-  df_list = df_list %>% map(function(x) { x %>% gather(Gene, CPM, -Condition) } ) %>% map(function(x) { merge(x, converter, by.x = "Gene", by.y = convert_from) } )
-  appender <- function(string, suffix = converter[[convert_to]][match(string, converter[[convert_from]])]) paste0(string, "\n (", suffix,")")
-  map(df_list, function(x) ggplot(x, aes(x = Condition, y = as.numeric(CPM), color = Condition)) + geom_boxplot(alpha = .5) + geom_jitter(alpha = .5,width = .1) + theme_bw() + scale_x_discrete(limits = levels) + scale_fill_discrete(breaks = levels) + theme(axis.text.x = element_text(angle=90, hjust=1)) + ylab(label = "Read counts (cpm)") + facet_wrap(~Gene, scales = "free", ncol = 2, labeller = as_labeller(appender)) )
-}
-
-
 # Multiplot
 # Multiple plot function
 #
@@ -433,6 +425,3 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
     }
   }
 }
-
-
-
