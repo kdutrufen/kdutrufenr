@@ -1,5 +1,114 @@
 library(tidyverse)
+library(CEMiTool)
+library(WGCNA)
+library(parallelMap)
 
+estimate_elbow <- function(n_genes = n_genes, dissTOM = dissTOM, deepSplit = deepSplit, gene_names = gene_names) {
+  geneTree <- dissTOM %>% as.dist() %>% hclust(method = "average")
+  dynamicModstest_list <- map(n_genes, function(i) geneTree %>% cutreeDynamic(distM = dissTOM, deepSplit = deepSplit, pamRespectsDendro = FALSE, minClusterSize = i))
+  dynamicModstest <- map(seq_along(dynamicModstest_list), function(i) dynamicModstest_list[[i]] %>% max()) %>% unlist()
+  dynamicColorstest <- map(seq_along(dynamicModstest_list), function(i) dynamicModstest_list[[i]] %>% labels2colors())
+  dynamicColorstest1 <- map(seq_along(dynamicModstest_list), function(i) data.frame(dynamicColors = dynamicColorstest[[i]], genes = rownames(adjacency)))
+  premoduleblockstest <- map(seq_along(dynamicColorstest1), function(i) dynamicColorstest1[[i]] %>% split(f = .$dynamicColors) %>% map(dplyr::select, -dynamicColors) %>% map(pull))
+  gene_names <- gene_names
+  inModuletest <- map(seq_along(premoduleblockstest), function(i) map(seq_along(premoduleblockstest[[i]]), function(j) gene_names %in% premoduleblockstest[[i]][[j]]))
+  # Select the corresponding Topological Overlap
+  modTOMtest <- map(seq_along(inModuletest), function(i) map(seq_along(inModuletest[[i]]), function(j) TOM[inModuletest[[i]][[j]], inModuletest[[i]][[j]]]))
+  for (i in 1:length(modTOMtest)) {
+    for (j in 1:length(modTOMtest[[i]])) {
+      dimnames(modTOMtest[[i]][[j]]) <- list(premoduleblockstest[[i]][[j]], premoduleblockstest[[i]][[j]])
+    }
+  }
+  ssd <- function(x) sum((x - mean(x))^2)
+  SSD <- map(seq_along(modTOMtest), function(i) map(seq_along(modTOMtest[[i]]), function(j) modTOMtest[[i]][[j]] %>% ssd())) %>% map(unlist) %>% map(sum) %>% unlist()
+  dynamicModstest_df <- data.frame(minimum_n_genes = n_genes, n_modules = dynamicModstest, SSD = SSD)
+  gg_plot <- dynamicModstest_df %>% ggplot(aes(x = n_modules, y = SSD)) + geom_line() + geom_point() + theme_bw()
+  dynamicModstest_df
+  gg_plot
+}
+
+parallel_estimate_elbow <- function(n_genes = n_genes, dissTOM = dissTOM, deepSplit = deepSplit, gene_names = gene_names) {
+  # Calculate the number of cores
+  no_cores <- detectCores() - 1
+  # Initiate cluster
+  parallelStartSocket(no_cores) 
+  geneTree <- dissTOM %>% as.dist() %>% hclust(method = "average")
+  dynamicModstest_list <- map(n_genes, function(i) geneTree %>% cutreeDynamic(distM = dissTOM, deepSplit = deepSplit, pamRespectsDendro = FALSE, minClusterSize = i))
+  dynamicModstest <- map(seq_along(dynamicModstest_list), function(i) dynamicModstest_list[[i]] %>% max()) %>% unlist()
+  dynamicColorstest <- map(seq_along(dynamicModstest_list), function(i) dynamicModstest_list[[i]] %>% labels2colors())
+  dynamicColorstest1 <- map(seq_along(dynamicModstest_list), function(i) data.frame(dynamicColors = dynamicColorstest[[i]], genes = rownames(adjacency)))
+  premoduleblockstest <- map(seq_along(dynamicColorstest1), function(i) dynamicColorstest1[[i]] %>% split(f = .$dynamicColors) %>% map(dplyr::select, -dynamicColors) %>% map(pull))
+  gene_names <- gene_names
+  inModuletest <- map(seq_along(premoduleblockstest), function(i) map(seq_along(premoduleblockstest[[i]]), function(j) gene_names %in% premoduleblockstest[[i]][[j]]))
+  # Select the corresponding Topological Overlap
+  modTOMtest <- map(seq_along(inModuletest), function(i) map(seq_along(inModuletest[[i]]), function(j) TOM[inModuletest[[i]][[j]], inModuletest[[i]][[j]]]))
+  for (i in 1:length(modTOMtest)) {
+    for (j in 1:length(modTOMtest[[i]])) {
+      dimnames(modTOMtest[[i]][[j]]) <- list(premoduleblockstest[[i]][[j]], premoduleblockstest[[i]][[j]])
+    }
+  }
+  ssd <- function(x) sum((x - mean(x))^2)
+  SSD <- map(seq_along(modTOMtest), function(i) map(seq_along(modTOMtest[[i]]), function(j) modTOMtest[[i]][[j]] %>% ssd())) %>% map(unlist) %>% map(sum) %>% unlist()
+  dynamicModstest_df <- data.frame(minimum_n_genes = n_genes, n_modules = dynamicModstest, SSD = SSD)
+  gg_plot <- dynamicModstest_df %>% ggplot(aes(x = n_modules, y = SSD)) + geom_line() + geom_point() + theme_bw()
+  parallelStop()
+  gg_plot
+}
+
+estimate_threshold_cut <- function(thresh_cut = thresh_cut, datExpr = datExpr, dynamicColors = dynamicColors, gene_names = gene_names, TOM = TOM) {
+  mergetest_list <- map(thresh_cut, function(i) datExpr %>% mergeCloseModules(colors = dynamicColors, cutHeight = i, verbose = 3) %>% .[["colors"]])
+  mergetest <- mergetest_list %>% map(table) %>% map(length) %>% unlist()
+  mergetest_1 <- map(seq_along(mergetest_list), function(i) data.frame(dynamicColors = mergetest_list[[i]], genes = rownames(adjacency)))
+  merge_blockstest <- map(seq_along(mergetest_1), function(i) mergetest_1[[i]] %>% split(f = .$dynamicColors) %>% map(dplyr::select, -dynamicColors) %>% map(pull))
+  gene_names <- datExpr %>% colnames()
+  inModule_merge_test <- map(seq_along(merge_blockstest), function(i) map(seq_along(merge_blockstest[[i]]), function(j) gene_names %in% merge_blockstest[[i]][[j]]))
+  # Select the corresponding Topological Overlap
+  modTOM_merge_test <- map(seq_along(inModule_merge_test), function(i) map(seq_along(inModule_merge_test[[i]]), function(j) TOM[inModule_merge_test[[i]][[j]], inModule_merge_test[[i]][[j]]]))
+  # Function to calculate the sum of squared deviations (from the mean)
+  ssd <- function(x) sum((x - mean(x))^2)
+  SSD_merge <- map(seq_along(modTOM_merge_test), function(i) map(seq_along(modTOM_merge_test[[i]]), function(j) modTOM_merge_test[[i]][[j]] %>% ssd())) %>% map(unlist) %>% map(sum) %>% unlist()
+  mergetest_df <- data.frame(
+    cor_thres = thresh_cut,
+    n_modules = mergetest,
+    SSD_merge = SSD_merge
+  )
+  gg_plot1 <- mergetest_df %>% ggplot(aes(x = n_modules, y = SSD_merge)) + geom_line() + geom_point() + theme_bw()
+  # gg_plot2 <- mergetest_df %>% ggplot(aes(x = cor_thres, y = SSD_merge)) + geom_line() + geom_point() + theme_bw()
+  # return(list(gg_plot1, gg_plot2))
+  return(gg_plot1)
+}
+
+parallel_estimate_threshold_cut <- function(thresh_cut = thresh_cut, datExpr = datExpr, dynamicColors = dynamicColors, gene_names = gene_names, TOM = TOM) {
+  # Calculate the number of cores
+  no_cores <- detectCores() - 1
+  # Initiate cluster
+  parallelStartSocket(no_cores) 
+  mergetest_list <- map(thresh_cut, function(i) datExpr %>% mergeCloseModules(colors = dynamicColors, cutHeight = i, verbose = 3) %>% .[["colors"]])
+  mergetest <- mergetest_list %>% map(table) %>% map(length) %>% unlist()
+  mergetest_1 <- map(seq_along(mergetest_list), function(i) data.frame(dynamicColors = mergetest_list[[i]], genes = rownames(adjacency)))
+  merge_blockstest <- map(seq_along(mergetest_1), function(i) mergetest_1[[i]] %>% split(f = .$dynamicColors) %>% map(dplyr::select, -dynamicColors) %>% map(pull))
+  gene_names <- datExpr %>% colnames()
+  inModule_merge_test <- map(seq_along(merge_blockstest), function(i) map(seq_along(merge_blockstest[[i]]), function(j) gene_names %in% merge_blockstest[[i]][[j]]))
+  # Select the corresponding Topological Overlap
+  modTOM_merge_test <- map(seq_along(inModule_merge_test), function(i) map(seq_along(inModule_merge_test[[i]]), function(j) TOM[inModule_merge_test[[i]][[j]], inModule_merge_test[[i]][[j]]]))
+  # Function to calculate the sum of squared deviations (from the mean)
+  ssd <- function(x) sum((x - mean(x))^2)
+  SSD_merge <- map(seq_along(modTOM_merge_test), function(i) map(seq_along(modTOM_merge_test[[i]]), function(j) modTOM_merge_test[[i]][[j]] %>% ssd())) %>% map(unlist) %>% map(sum) %>% unlist()
+  mergetest_df <- data.frame(
+    cor_thres = thresh_cut,
+    n_modules = mergetest,
+    SSD_merge = SSD_merge
+  )
+  gg_plot1 <- mergetest_df %>% ggplot(aes(x = n_modules, y = SSD_merge)) + geom_line() + geom_point() + theme_bw()
+  # gg_plot2 <- mergetest_df %>% ggplot(aes(x = cor_thres, y = SSD_merge)) + geom_line() + geom_point() + theme_bw()
+  # return(list(gg_plot1, gg_plot2))
+  parallelStop()
+  gg_plot1
+}
+
+get_genes_from_pathway <- function(enrichment_df = enrichment_df, pathway = pathway, comparison = comparison){enrichment_df %>% filter(Description == pathway) %>% filter(Cluster == comparison) %>% dplyr::select(Gene_Symbol) %>% pull %>% strsplit(split = "/") %>% unlist}
+
+get_genes_from_pathways <- function(enrichment_df = enrichment_df, pathway = pathway, comparison = comparison){enrichment_df %>% filter(Description == pathway) %>% filter(Cluster == comparison) %>% dplyr::select(geneID) %>% pull %>% strsplit(split = "/") %>% unlist}
 plot_genes_boxplot = function(df, genes, design, levels, converter, convert_from, convert_to){
   df = df %>% cpm %>% as.data.frame %>% rownames_to_column %>% filter(rowname %in% c(genes)) %>% distinct(rowname, .keep_all = TRUE) %>% arrange(rowname) %>% column_to_rownames
   if (nrow(df)%%4==0){
@@ -14,12 +123,64 @@ plot_genes_boxplot = function(df, genes, design, levels, converter, convert_from
   map(df_list, function(x) ggplot(x, aes(x = Condition, y = as.numeric(CPM), color = Condition)) + geom_boxplot(alpha = .5) + geom_jitter(alpha = .5,width = .1) + theme_bw() + scale_x_discrete(limits = levels) + scale_fill_discrete(breaks = levels) + theme(axis.text.x = element_text(angle=90, hjust=1)) + ylab(label = "Read counts (cpm)") + facet_wrap(~Gene, scales = "free", ncol = 2, labeller = as_labeller(appender)) )
 }
 
+plot_genes_violinplot = function(df, genes, design, levels, converter, convert_from, convert_to){
+  df = df %>% cpm %>% as.data.frame %>% rownames_to_column %>% filter(rowname %in% c(genes)) %>% distinct(rowname, .keep_all = TRUE) %>% arrange(rowname) %>% column_to_rownames
+  if (nrow(df)%%4==0){
+    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
+  } else {
+    df_list = map(1:floor(length(genes)/4), function(i) df[(4*i-3):(4*i),] )
+    df_list[[(length(df_list)+1)]] = df[((length(df_list)*4)+1):length(genes),]
+  }
+  df_list = df_list %>% map(t) %>% map(function(x) as.data.frame(cbind(x, "Condition" = as.character(design, levels = levels)) ) )
+  df_list = df_list %>% map(function(x) { x %>% gather(Gene, CPM, -Condition) } ) %>% map(function(x) { merge(x, converter, by.x = "Gene", by.y = convert_from) } )
+  appender <- function(string, suffix = converter[[convert_to]][match(string, converter[[convert_from]])]) paste0(string, "\n (", suffix,")")
+  map(df_list, function(x) ggplot(x, aes(x = Condition, y = as.numeric(CPM), color = Condition)) + geom_violin(alpha = .5) + geom_jitter(alpha = .5,width = .1) + theme_bw() + scale_x_discrete(limits = levels) + scale_fill_discrete(breaks = levels) + theme(axis.text.x = element_text(angle=90, hjust=1)) + ylab(label = "Read counts (cpm)") + facet_wrap(~Gene, scales = "free", ncol = 2, labeller = as_labeller(appender)) )
+}
+
+library(ballgown)
+# adapted from ballgown
+get_Attribute_Field = function (x, field, attrsep = "; ") 
+{
+  s = strsplit(x, split = attrsep, fixed = TRUE)
+  sapply(s, function(atts) {
+    a = strsplit(atts, split = "=", fixed = TRUE)
+    m = match(field, sapply(a, "[", 1))
+    if (!is.na(m)) {
+      rv = a[[m]][2]
+    }
+    else {
+      rv = as.character(NA)
+    }
+    return(rv)
+  })
+}
+
 library(stringr)
 ora_to_df = function(ora = ora){ unclass(ora) %>% attr("ora") %>% as.data.frame}
 filter_ora = function(df = dfa, p.adjust = p.adjust, Count = Count){ df %>% filter(p.adjust<0.05) %>% filter(Count>2) }
 order_ora_genes = function(df = df, geneID = geneID){ df[[geneID]] %>% strsplit(split = "/") %>% map(sort) %>% map(paste, collapse = "/") %>% unlist }
 ora_genes_to_title = function(df = df, geneID = geneID){ ora_df[[geneID]] %>% strsplit(split = "/") %>% map(str_to_title) %>% map(paste, collapse = "/") %>% unlist }
 add_ensembl = function(df = df, geneID = geneID, convert_table = convert_table, from = from, to = to){ df[[geneID]] %>% strsplit(split = "/") %>% map(function(x) as.character( convert_table[[to]][ match( x, convert_table[[from]] ) ] ) ) %>% map(function(x) paste(x, collapse = "/")) %>% unlist }
+order_genes = function(df = df, geneID = geneID){ df[[geneID]] %>% strsplit(split = "/") %>% map(sort) %>% map(paste, collapse = "/") %>% unlist }
+
+# adapted from ballgown
+# get_Attribute_Field
+get_Attribute_Field = function (x, field, attrsep = "; ") 
+{
+  s = strsplit(x, split = attrsep, fixed = TRUE)
+  sapply(s, function(atts) {
+    a = strsplit(atts, split = "=", fixed = TRUE)
+    m = match(field, sapply(a, "[", 1))
+    if (!is.na(m)) {
+      rv = a[[m]][2]
+    }
+    else {
+      rv = as.character(NA)
+    }
+    return(rv)
+  })
+}
+
 
 # plot gsea function from CEMiTool
 setGeneric('plot_gsea', function(cem, ...) {
