@@ -1,0 +1,118 @@
+---
+title: "Lançamentos_CD"
+author: "Kdu Trufen"
+date: "16 de fevereiro de 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+cd_file <- "~/Dropbox/Documentos/Lançamentos_CD_Heavy_Metal_2019.csv"
+Lançamentos_CD <- cd_file %>% read_delim(delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+
+# Lançamentos_CD <- read_delim("~/Dropbox/Documentos/Lançamentos_CD.csv", delim = ",", escape_double = FALSE, trim_ws = TRUE, quote = "\\")
+```
+
+```{r}
+Lançamentos_CD <- Lançamentos_CD %>% dplyr::filter(!grepl('Black|Death|Grind|Stoner|Doom|Sludge|Gothic|Viking|Crossover|Goregrind|Extreme|Pagan|Metalcore|Hardcore|Djent', Genre)) %>% 
+dplyr::filter(!grepl('Demo|Live|Compilation|Video|Boxed', Type))
+
+Lançamentos_CD <- Lançamentos_CD %>% distinct()
+```
+
+# Lançamentos_CD <- Lançamentos_CD %>% dplyr::rename("Release date" = `Release date"`)
+# Lançamentos_CD <- Lançamentos_CD %>% dplyr::rename("Band" = `"Band`)
+# 
+# Lançamentos_CD <- Lançamentos_CD %>% mutate(Band = Band %>% str_remove(pattern = "\""))
+# Lançamentos_CD <- Lançamentos_CD %>% mutate("Release date" = "Release date" %>% str_remove(pattern = "\\\\\""))
+# Lançamentos_CD <- Lançamentos_CD %>% mutate("Release date" = "Release date" %>% str_remove(pattern = "\\\\\"\""))
+
+```{r}
+Lançamentos_CD %>% write.table(file = "~/Dropbox/Documentos/Lançamentos_CD_Heavy_Metal_2019.csv", sep="\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+```
+
+
+
+```{r}
+library(rjson)
+
+json_file <- "https://www.metal-archives.com/release/upcoming"
+json_data <- fromJSON(paste(readLines(json_file), collapse=""))
+```
+
+
+
+```{r}
+library(htmltab)
+url <- "https://www.metal-archives.com/release/upcoming"
+upcoming_releases <- htmltab(doc = url, which = "//th[text() = 'Band']/ancestor::table")
+```
+
+
+```{r}
+library(XML)
+readHTMLTable("https://www.metal-archives.com/release/upcoming")
+
+library(XML)
+library(RCurl)
+library(rlist)
+
+theurl <- getURL("https://www.metal-archives.com/release/upcoming",.opts = list(ssl.verifypeer = FALSE) )
+tables <- readHTMLTable(theurl)
+tables <- list.clean(tables, fun = is.null, recursive = FALSE)
+n.rows <- unlist(lapply(tables, function(t) dim(t)[1]))
+```
+
+```{r}
+library(rvest)
+lego_movie <- read_html("http://www.imdb.com/title/tt1490017/")
+lego_movie %>% html_nodes("strong span") %>% html_text() %>% as.numeric()
+
+upcoming_releases <- read_html("https://www.metal-archives.com/release/upcoming")
+upcoming_releases %>% html_nodes(xpath = `//*[contains(concat( " ", @class, " " ), concat( " ", "sorting", " " ))] | //*[contains(concat( " ", @class, " " ), concat( " ", "sorting_asc", " " ))] | //td`)
+
+upcoming_releases <- read_html("https://www.metal-archives.com/release/upcoming")
+upcoming_releases %>% html_nodes('//td')
+upcoming_releases %>% html_nodes("div div")
+
+# upcoming_releases %>% html_nodes(".sorting , .sorting_asc , td")
+# 
+# upcoming_releases %>% html_nodes('release/ajax-upcoming/json/1')
+# 
+# dataTable = createGrid(\"#upcomingAlbumList\", 100, 'release/ajax-upcoming/json/1',  { aaSorting: [[4, 'asc']] })
+#                         
+# upcoming_releases %>% html_text()
+# 
+# xml("https://www.metal-archives.com/release/upcoming")
+# 
+# html_table("https://www.metal-archives.com/release/upcoming")
+# html_form("https://www.metal-archives.com/release/upcoming")
+# html_session("https://www.metal-archives.com/release/upcoming")
+# jump_to("https://www.metal-archives.com/release/upcoming")
+# follow_link("https://www.metal-archives.com/release/upcoming")
+```
+
+```{r}
+library(curl)
+library(RCurl)
+url <- "https://www.metal-archives.com/release/upcoming"
+url_parsed <- url %>% getURL() %>% htmlParse(asText = TRUE)
+url_parsed <- htmlParse(getURL(url), asText = TRUE)
+
+
+con <- curl("https://www.metal-archives.com/release/upcoming")
+
+open(con)
+
+out <- readLines(con)
+cat(out, sep = "\n")
+```
