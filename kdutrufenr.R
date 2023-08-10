@@ -3,6 +3,22 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+get_attribute_field = function (x, field, attrsep = "; ") 
+{
+  s <- strsplit(x, split = attrsep, fixed = TRUE)
+  sapply(s, function(atts) {
+    a <- strsplit(atts, split = "=", fixed = TRUE)
+    m <- match(field, sapply(a, "[", 1))
+    if (!is.na(m)) {
+      rv <- a[[m]][2]
+    }
+    else {
+      rv <- as.character(NA)
+    }
+    return(rv)
+  })
+}
+
 ora_analysis <- function(genes_list, database = KEGG_2019_Human, pvalue_cutoff = 1, qvalue_cutoff = 1, p.adjust_cutoff = 0.1, count_at_least = 3) {
   
   # Load required packages
