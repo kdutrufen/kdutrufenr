@@ -14,27 +14,55 @@ knitr::opts_chunk$set(echo = TRUE)
 library(httr)
 library(jsonlite)
 
-base_url <- "https://www.metal-archives.com/search/ajax-advanced/searching/albums/"
+fetch_metal_albums_by_year_month <- function(year, month) {
+
+  base_url <- "https://www.metal-archives.com/search/ajax-advanced/searching/albums/"
+  
+  # Parameter list (with defaults for common values)
+  url_params <- list(
+    bandName = "",
+    releaseTitle = "",
+    releaseYearFrom = year,
+    releaseMonthFrom = month,
+    releaseYearTo = year,
+    releaseMonthTo = month,
+    country = "",
+    location = "",
+    releaseLabelName = "",
+    releaseCatalogNumber = "",
+    releaseIdentifiers = "",
+    releaseRecordingInfo = "",
+    releaseDescription = "",
+    releaseNotes = "",
+    genre = "-death+-grindcore+-groove+-black+-Sludge+-Djent+-Metalcore+-Deathcore+-Extreme+-Blackened+-Gorenoise+-Goregrind+-Doom+-Stoner+-Crossover+-Various",
+    `releaseType[]` = "1",
+    `releaseType[]` = "5"
+  )
+
+  # Construct the URL
+  search_url <- paste0(base_url, "?", paste(names(url_params), "=", url_params, collapse = "&"), "#albums") %>% 
+                str_remove_all(pattern = " ")
+
+  # Fetch data
+  response <- GET(url = search_url)
+  results <- fromJSON(content(response, as = "text"))
+
+  # Extract and clean the data
+  data_table <- results$aaData
+  albums_df <- as.data.frame(data_table, stringsAsFactors = FALSE)
+  colnames(albums_df) <- c("Band", "Album", "Type", "Genre", "Date") 
+
+  albums_df <- albums_df %>% 
+                mutate(Band = Band %>% str_replace(pattern = "<a href=\".*?\">(.*?)</a>", replacement = "\\1")) %>%
+                mutate(Album = Album %>% str_replace(pattern = "<a href=\".*?\">(.*?)</a>.*", replacement = "\\1")) %>%
+                mutate(Date = Date %>% str_replace(pattern = ".*<!--\\s*(\\d{4}-\\d{2}-\\d{2})\\s*-->.*", replacement = "\\1")) %>%
+                mutate(Date = Date %>% lubridate::as_date())
+
+  # Return the cleaned dataframe
+  return(albums_df)
+}
 
 
-base_url <- "https://www.metal-archives.com/search/ajax-advanced/searching/albums/?bandName=&releaseTitle=&releaseYearFrom=2024&releaseMonthFrom=01&releaseYearTo=2024&releaseMonthTo=12&country=&location=&releaseLabelName=&releaseCatalogNumber=&releaseIdentifiers=&releaseRecordingInfo=&releaseDescription=&releaseNotes=&genre=-death+-grindcore+-groove+-black+-Sludge+-Djent+-Metalcore+-Deathcore+-Extreme+-Blackened+-Gorenoise&releaseType[]=1&releaseType[]=5#albums"
-
-# make the GET request and store it in 'response'
-response <- GET(url = base_url)
-
-# Parse the JSON data:  
-results <- fromJSON(content(response, as = "text"))
-
-out <- readLines(con)
-cat(out, sep = "\n")
-
-# Parse the JSON data:  
-results <- fromJSON(content(response, as = "text"))
-
-# Extract the data table:
-data_table <- results$aaData
-
-albums_df <- as.data.frame(data_table, stringsAsFactors = FALSE)
-
-colnames(albums_df) <- c("Band", "Album", "Type", "Genre", "Date") 
+jan_2024_df <- fetch_metal_albums_by_year_month(month = 1, year = 2024)
+feb_2024_df <- fetch_metal_albums_by_year_month(month = 2, year = 2024)
 ```
