@@ -81,7 +81,7 @@ gsea_analysis <- function(database = KEGG_2019_Mouse, sorted_genes, p_value_cuto
   # Extract the gene sets (terms) from the GMT data frame
   gmt_list <- gmt_df %>%
     split(f = .$term) %>%
-    purrr::map(pull, gene)
+    purrr::map("gene")
   
   # Perform Gene Set Enrichment Analysis (GSEA) using the sorted_genes and the database
   gsea_result <- clusterProfiler::GSEA(
