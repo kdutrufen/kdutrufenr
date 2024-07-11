@@ -24,16 +24,17 @@ create_volcano_plot <- function(df, dot_size = 0.5){
     ggplot(aes(x = as.numeric(logFC), y = -log10(as.numeric(FDR)), colour = DEG_status)) + 
     geom_point(alpha = 0.4, size = dot_size) +
     theme_bw() +
+    xlim(c(-max_LFC, max_LFC)) + 
+    ylim(c(0, max_FDR)) +    
     scale_color_manual(values = c("Down" = "#094FED", "Not_DEG" = "black", "Up" = "red"),
                        labels = c("Downregulated DEG", "Not significant", "Upregulated DEG")) +
-    xlim(c(-max_LFC, max_LFC)) + ylim(c(0, max_FDR)) +
-    expand_limits(x = 0, y = 0) +  # Ensure axes cross at (0,0)
+    # expand_limits(x = 0, y = 0) +  # Ensure axes cross at (0,0)
     labs(x = expression(paste(log[2], " Fold Change")), y = expression(paste("\u2212", log[10], " adjusted p-value"))) +
     theme(legend.title = element_blank()) +
-    guides(color = guide_legend(override.aes = list(size = 5))) + # change size of dots in legend
+    guides(color = guide_legend(override.aes = list(size = 5))) + # Change size of dots in legend
     theme(legend.position = "bottom") +
-    easy_all_text_size(size = 20) +
-    scale_x_continuous(labels = function(x) {ifelse(x < 0, paste("\u2212", abs(x)), x)})
+    easy_all_text_size(size = 20) # +
+    # scale_x_continuous(labels = function(x) {ifelse(x < 0, paste("\u2212", abs(x)), x)})
   
   return(volcano_plot)
 }
