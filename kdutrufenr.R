@@ -39,6 +39,37 @@ create_volcano_plot <- function(df, dot_size = 0.5){
   return(volcano_plot)
 }
 
+create_read_count_barplot <- function(read_count_df, design_df) {
+  library(Polychrome)
+
+  # Calculate summary statistics
+  sum_data <- data.frame(
+    counts = c(mean(colSums(read_count_df)), apply(read_count_df, 2, sum)),
+    samples = c("Average", colnames(read_count_df))
+  )
+
+  # Color assignment
+  col_cell <- unname(polychrome())[design_df$condition %>% as.factor()]
+
+  # Create the bar plot
+  read_count_barplot <- sum_data %>%
+    ggplot(aes(x = samples, y = counts, fill = samples)) +
+    geom_bar(colour = "black", stat = "identity", fill = c("yellow", col_cell)) +
+    geom_hline(yintercept = 8e+06, colour = "black") +                                     # Horizontal reference line
+    theme_bw() +                                                                           # Classic black & white theme
+    labs(x = "Samples", y = "Read count") +                                                # Axis labels
+    ggeasy::easy_x_axis_labels_size(size = 10) +                                           # Adjust x-axis label size
+    ggeasy::easy_y_axis_labels_size(size = 10) +                                           # Adjust y-axis label size
+    ggeasy::easy_x_axis_title_size(size = 20) +                                            # Adjust x-axis title size
+    ggeasy::easy_y_axis_title_size(size = 20) +                                            # Adjust y-axis title size
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +                             # Rotate x-axis labels
+    scale_y_continuous(labels = function(x) {
+      ifelse(x == 0, "0", paste0(format(x / 1e7, scientific = FALSE), " \u00D7 10\u2077")) # Use Unicode characters
+    })
+
+  return(read_count_barplot)
+}
+
 get_attribute_field = function (x, field, attrsep = "; ") 
 {
   s <- strsplit(x, split = attrsep, fixed = TRUE)
