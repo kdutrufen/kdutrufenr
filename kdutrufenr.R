@@ -3,6 +3,41 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_volcano_plot <- function(df, dot_size = 0.5){
+  
+  # Check for required columns
+  required_cols <- c("logFC", "FDR", "DEG_status")
+  if (!all(required_cols %in% colnames(df))) {
+    stop(paste("Missing required columns:", paste(setdiff(required_cols, colnames(df)), collapse = ", ")))
+  }
+
+  # Enhanced input validation    
+  valid_levels <- c("Down", "Not_DEG", "Up")
+  if (!all(unique(df$DEG_status) %in% valid_levels)) {
+    stop(paste("Invalid `DEG_status` levels. Allowed levels are:", paste(valid_levels, collapse = ", ")))
+  }
+  
+  max_LFC <- df$logFC %>% as.numeric() %>% range() %>% abs() %>% max() %>% ceiling()
+  max_FDR <- df$FDR %>% as.numeric() %>% log10() %>% '*'(-1) %>% max() %>% ceiling()
+  
+  volcano_plot <- df %>%
+    ggplot(aes(x = as.numeric(logFC), y = -log10(as.numeric(FDR)), colour = DEG_status)) + 
+    geom_point(alpha = 0.4, size = dot_size) +
+    theme_bw() +
+    scale_color_manual(values = c("Down" = "#094FED", "Not_DEG" = "black", "Up" = "red"),
+                       labels = c("Downregulated DEG", "Not significant", "Upregulated DEG")) +
+    xlim(c(-max_LFC, max_LFC)) + ylim(c(0, max_FDR)) +
+    expand_limits(x = 0, y = 0) +  # Ensure axes cross at (0,0)
+    labs(x = expression(paste(log[2], " Fold Change")), y = expression(paste("\u2212", log[10], " adjusted p-value"))) +
+    theme(legend.title = element_blank()) +
+    guides(color = guide_legend(override.aes = list(size = 5))) + # change size of dots in legend
+    theme(legend.position = "bottom") +
+    easy_all_text_size(size = 20) +
+    scale_x_continuous(labels = function(x) {ifelse(x < 0, paste("\u2212", abs(x)), x)})
+  
+  return(volcano_plot)
+}
+
 get_attribute_field = function (x, field, attrsep = "; ") 
 {
   s <- strsplit(x, split = attrsep, fixed = TRUE)
