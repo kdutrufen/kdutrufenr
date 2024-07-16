@@ -3,6 +3,61 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
+ pseudo_paths <- sce$pseudo_paths
+
+ n_lineages <- pseudo_paths %>% ncol()
+
+ average_pseudo_time <- pseudo_paths %>% rowMeans(na.rm = TRUE)
+ lineage_pseudo_time_list <- purrr::map(seq_len(n_lineages), function(i) pseudo_paths[, i]) %>% purrr::set_names(paste0("lineage_", 1:n_lineages))
+
+ gene_v <- gene_v %>%
+  intersect(row.names(sub_mnn_out@assays@data$tpm)) %>%
+  sort() %>%
+  unique()
+
+ sce@assays@data$tpm <- (sce@assays@data$counts %>% cpm() %>% "/"(10)) %>%
+  "+"(1) %>%
+  log2()
+
+ tpm_data_to_heatmap <- sce@assays@data$tpm[row.names(sub_mnn_out@assays@data$tpm) %in% genes, ] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "cell") %>%
+  mutate(pseudo_time = pseudo_time) %>%
+  arrange(pseudo_time) %>%
+  pivot_longer(cols = names(.)[2]:names(.)[ncol(.)], names_to = "gene", values_to = "tpm")
+
+ max_tpm <- tpm_data_to_heatmap$tpm %>% max()
+
+ lineage_pseudo_list <- lineage_pseudo_time_list %>% purrr::map(function(x) {
+  sce@assays@data$tpm[row.names(sce@assays@data$tpm) %in% gene_v, ] %>%
+   t() %>%
+   as.data.frame() %>%
+   rownames_to_column(var = "cell") %>%
+   mutate(pseudo_time = x) %>%
+   drop_na(pseudo_time) %>%
+   arrange(pseudo_time) %>%
+   dplyr::select(-pseudo_time) %>%
+   column_to_rownames(var = "cell") %>%
+   t() %>%
+   as.data.frame()
+ })
+
+ lineage_pseudo_list$average_pseudo <- sce@assays@data$tpm[row.names(sce@assays@data$tpm) %in% gene_v, ] %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "cell") %>%
+  mutate(pseudo_time = average_pseudo_time) %>%
+  arrange(pseudo_time) %>%
+  dplyr::select(-pseudo_time) %>%
+  column_to_rownames(var = "cell") %>%
+  t() %>%
+  as.data.frame()
+
+ return(lineage_pseudo_list)
+}
+                                        
 create_volcano_plot <- function(df, dot_size = 0.5){
   
   # Check for required columns
