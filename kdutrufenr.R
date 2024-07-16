@@ -4,58 +4,60 @@ library(WGCNA)
 library(parallelMap)
 
 create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
- pseudo_paths <- sce$pseudo_paths
+  # Input validation
+  if (!is(sce, "SingleCellExperiment")) {
+    stop("Input 'sce' must be a SingleCellExperiment object.")
+  }
+  if (!is.character(gene_v) || !all(nzchar(gene_v))) {
+    stop("Input 'gene_v' must be a character vector of gene names.")
+  }
+  if (is.null(sce$pseudo_paths)) {
+    stop("Input 'sce' does not contain a 'pseudo_paths' slot.")
+  }
+  if (!all(gene_v %in% rownames(sce))) {
+    missing_genes <- gene_v[!gene_v %in% rownames(sce)]
+    warning(paste("The following genes are not found in 'sce':", paste(missing_genes, collapse = ", ")))
+    gene_v <- gene_v[gene_v %in% rownames(sce)]
+  }
+  
+  # gene_v <- gene_v %>%
+  #   intersect(row.names(sce)) %>%
+  #   sort() %>%
+  #   unique()
 
- n_lineages <- pseudo_paths %>% ncol()
+  # Calculate TPM values
+  # sce@assays@data$tpm <- log2(cpm(sce@assays@data$counts) / 10 + 1) %>% as(Class = "dgCMatrix")
+  sce@assays@data$tpm <- (sce@assays@data$counts %>% cpm() %>% "/"(10)) %>% "+"(1) %>% log2() %>% as(Class = "dgCMatrix")
 
- average_pseudo_time <- pseudo_paths %>% rowMeans(na.rm = TRUE)
- lineage_pseudo_time_list <- purrr::map(seq_len(n_lineages), function(i) pseudo_paths[, i]) %>% purrr::set_names(paste0("lineage_", 1:n_lineages))
+  # Extract and pre-process pseudotime data
+  pseudo_paths <- sce$pseudo_paths
+  n_lineages <- pseudo_paths %>% ncol()
+  average_pseudo_time <- pseudo_paths %>% rowMeans(na.rm = TRUE)
 
- gene_v <- gene_v %>%
-  intersect(row.names(sub_mnn_out@assays@data$tpm)) %>%
-  sort() %>%
-  unique()
+  # Create lineage specific pseudotime list
+  lineage_pseudo_time_list <- purrr::map(seq_len(n_lineages), function(i) pseudo_paths[, i]) %>% purrr::set_names(paste0("lineage_", 1:n_lineages))
 
- sce@assays@data$tpm <- (sce@assays@data$counts %>% cpm() %>% "/"(10)) %>%
-  "+"(1) %>%
-  log2()
+  # Long format TPM data function (helper)
+  to_long_tpm <- function(tpm_matrix, pseudo_time) {
+    tpm_matrix[rownames(tpm_matrix) %in% gene_v, ] %>%
+      t() %>%
+      as.data.frame() %>%
+      # rownames_to_column(var = "cell") %>%
+      mutate(pseudo_time = pseudo_time) %>%
+      drop_na(pseudo_time) %>%
+      arrange(pseudo_time) %>%
+      dplyr::select(-pseudo_time) %>%
+      # column_to_rownames(var = "cell") %>%
+      t() %>%
+      as.data.frame()
+  }
 
- tpm_data_to_heatmap <- sce@assays@data$tpm[row.names(sub_mnn_out@assays@data$tpm) %in% genes, ] %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "cell") %>%
-  mutate(pseudo_time = pseudo_time) %>%
-  arrange(pseudo_time) %>%
-  pivot_longer(cols = names(.)[2]:names(.)[ncol(.)], names_to = "gene", values_to = "tpm")
+  # Create lineage specific pseudotime dataframes
+  lineage_pseudo_list <- lineage_pseudo_time_list %>% purrr::map(to_long_tpm, tpm_matrix = sce@assays@data$tpm)
 
- max_tpm <- tpm_data_to_heatmap$tpm %>% max()
+  lineage_pseudo_list$average_pseudo <- to_long_tpm(sce@assays@data$tpm, average_pseudo_time)
 
- lineage_pseudo_list <- lineage_pseudo_time_list %>% purrr::map(function(x) {
-  sce@assays@data$tpm[row.names(sce@assays@data$tpm) %in% gene_v, ] %>%
-   t() %>%
-   as.data.frame() %>%
-   rownames_to_column(var = "cell") %>%
-   mutate(pseudo_time = x) %>%
-   drop_na(pseudo_time) %>%
-   arrange(pseudo_time) %>%
-   dplyr::select(-pseudo_time) %>%
-   column_to_rownames(var = "cell") %>%
-   t() %>%
-   as.data.frame()
- })
-
- lineage_pseudo_list$average_pseudo <- sce@assays@data$tpm[row.names(sce@assays@data$tpm) %in% gene_v, ] %>%
-  t() %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "cell") %>%
-  mutate(pseudo_time = average_pseudo_time) %>%
-  arrange(pseudo_time) %>%
-  dplyr::select(-pseudo_time) %>%
-  column_to_rownames(var = "cell") %>%
-  t() %>%
-  as.data.frame()
-
- return(lineage_pseudo_list)
+  return(lapply(lineage_pseudo_list, tibble))
 }
                                         
 create_volcano_plot <- function(df, dot_size = 0.5){
