@@ -181,6 +181,50 @@ create_read_count_barplot <- function(read_count_df, design_df) {
   return(read_count_barplot)
 }
 
+plot_lineage_trajectory_figure <- function(sce, lineage_column = "Lineage1", genes_of_interest = NULL) {
+  
+  new_lineage_column <- lineage_column %>% str_to_lower() %>% str_replace(pattern = "ge", replacement = "ge_")
+  
+  trajectory_df_list <- create_gene_tpm_trajectory_dataframe(sce = sce, gene_v = genes)
+  
+  # Generate dendrogram and heatmap
+  if (new_lineage_column %in% names(trajectory_df_list)) {
+    dendro_heatmap_fig <- plot_dendro_heatmap_for_paper(trajectory_df_list[[new_lineage_column]])
+
+    # Create trajectory plots
+    label_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "label")
+    batch_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "batch")
+    sling_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "pseudotime")
+
+    # Extract legends
+    dendro_legend <- get_legend(dendro_heatmap_fig$plt_hmap)
+    label_legend <- get_legend(label_fig)
+    batch_legend <- get_legend(batch_fig)
+    sling_legend <- get_legend(sling_fig)
+  
+    # Remove legends from individual plots
+    label_fig <- label_fig + theme(legend.position = "none")
+    batch_fig <- batch_fig + theme(legend.position = "none")
+    sling_fig <- sling_fig + theme(legend.position = "none")
+    dendro_heatmap_fig$plt_hmap <- dendro_heatmap_fig$plt_hmap + theme(legend.position = "none")
+    dendro_heatmap_fig$plt_dendr <- as.ggplot(dendro_heatmap_fig$plt_dendr)
+  
+    # Create combined figure
+    figure <- dendro_heatmap_fig$plt_hmap %>%
+      insert_top(plot = sling_fig, height = 1/20) %>%
+      insert_top(plot = batch_fig, height = 1/20) %>%
+      insert_top(plot = label_fig, height = 1/20) %>%
+      insert_left(plot = dendro_heatmap_fig$plt_dendr, width = 1/10)
+  
+    figure_legend <- ggdraw(label_legend) /
+      (ggdraw(dendro_legend) | ggdraw(batch_legend) | ggdraw(sling_legend))
+  
+    return(as.ggplot(figure) / figure_legend)
+  } else {
+    stop(paste0(lineage_column, "' not found in the data."))
+  }
+}
+
 get_attribute_field = function (x, field, attrsep = "; ") 
 {
   s <- strsplit(x, split = attrsep, fixed = TRUE)
