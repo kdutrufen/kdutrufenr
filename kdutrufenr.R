@@ -60,9 +60,6 @@ create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
   return(lapply(lineage_pseudo_list, tibble))
 }
 
-plot_lineage_trajectories <- function(sce, lineage_column = "Lineage1", color_by = "label") {
-  sc_info_df <- data.frame(
-    label = as.character(sce$label),
     batch = as.character(sce$batch),
     cell = colnames(sce)
   ) %>%
@@ -105,13 +102,17 @@ plot_lineage_trajectories <- function(sce, lineage_column = "Lineage1", color_by
       labs(x = NULL, y = NULL, fill = "Embryonic stage")
   } else if (color_by == "pseudotime") {
     # Add logic for batch coloring if needed
-    plot <- plot +
-      geom_tile(aes(fill = as.numeric(!!sym(lineage_column)))) +
+    plot <- pseudo_paths_df %>%
+      ggplot(aes(x = 1:nrow(pseudo_paths_df), y = 1, fill = as.numeric(!!sym(lineage_column)))) +
+      geom_tile() +
+      theme_void() +
+      theme(legend.position = "bottom") +
+      guides(fill = guide_legend(title.position = "top", title.hjust = 0.5)) +
       scale_fill_viridis(option = "viridis") +
-      labs(x = NULL, y = NULL, fill = paste("Pseudotime", lineage_column))
+      labs(x = NULL, y = NULL, fill = paste("Pseudotime", lineage_column)) +
+      guides(fill = guide_colorbar(title.position = "top", label.position = "bottom"))  # Set legend title and position
   }
 }
-
                                          
 create_volcano_plot <- function(df, dot_size = 0.5){
   
