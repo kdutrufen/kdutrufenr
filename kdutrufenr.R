@@ -59,7 +59,60 @@ create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
 
   return(lapply(lineage_pseudo_list, tibble))
 }
-                                        
+
+plot_lineage_trajectories <- function(sce, lineage_column = "Lineage1", color_by = "label") {
+  sc_info_df <- data.frame(
+    label = as.character(sce$label),
+    batch = as.character(sce$batch),
+    cell = colnames(sce)
+  ) %>%
+    cbind(sce$pseudo_paths)
+
+  # Extract relevant data
+  pseudo_paths_df <- sc_info_df %>%
+    rowwise() %>%
+    mutate(average = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+    dplyr::select(cell, lineage_column, label, batch) %>%
+    drop_na(!!sym(lineage_column)) %>%
+    arrange(!!sym(lineage_column))
+
+  # Create plot
+  plot <- pseudo_paths_df %>%
+    ggplot(aes(x = 1:nrow(pseudo_paths_df), y = 1, fill = factor(!!sym(color_by)))) +
+    geom_tile() +
+    theme_void() +
+    # labs(x = NULL, y = NULL, fill = color_by) +
+    theme(legend.position = "bottom") +
+    guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
+
+  # Apply color palette based on color_by variable
+  if (color_by == "label") {
+    plot <- plot +
+      scale_fill_manual(values = unname(polychrome())) +
+      labs(x = NULL, y = NULL, fill = "Cluster") +
+      guides(fill = guide_legend(
+        override.aes = list(size = 3), # Adjust legend key size
+        nrow = 2,
+        label.position = "right",
+        title.position = "top", # Position title at the top
+        title.hjust = 0.5,
+        keywidth = unit(0.8, "cm")
+      ))
+  } else if (color_by == "batch") {
+    # Add logic for batch coloring if needed
+    plot <- plot +
+      scale_fill_manual(values = RColorBrewer::brewer.pal(n = length(unique(pseudo_paths_df$batch)), name = "Set1")) +
+      labs(x = NULL, y = NULL, fill = "Embryonic stage")
+  } else if (color_by == "pseudotime") {
+    # Add logic for batch coloring if needed
+    plot <- plot +
+      geom_tile(aes(fill = as.numeric(!!sym(lineage_column)))) +
+      scale_fill_viridis(option = "viridis") +
+      labs(x = NULL, y = NULL, fill = paste("Pseudotime", lineage_column))
+  }
+}
+
+                                         
 create_volcano_plot <- function(df, dot_size = 0.5){
   
   # Check for required columns
