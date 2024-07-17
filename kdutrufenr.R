@@ -151,36 +151,42 @@ create_volcano_plot <- function(df, dot_size = 0.5){
 }
 
 create_read_count_barplot <- function(read_count_df, design_df) {
+  # Load the required libraries for color palettes and plot customization
+  library(pals)
   library(Polychrome)
-
-  # Calculate summary statistics
+  
+  # Load the required libraries for color palettes and plot customization
   sum_data <- data.frame(
-    counts = c(mean(colSums(read_count_df)), apply(read_count_df, 2, sum)),
-    samples = c("Average", colnames(read_count_df))
+    read_count = c(mean(colSums(read_count_df)), apply(read_count_df, 2, sum)),
+    sample = c("Average", colnames(read_count_df)),
+    sample_type = c("Average", design_df$condition)
   )
-
-  # Color assignment
+  
+  # Generate a color palette based on the unique sample types (conditions)
   col_cell <- unname(polychrome())[design_df$condition %>% as.factor()]
-
+  
   # Create the bar plot
   read_count_barplot <- sum_data %>%
-    ggplot(aes(x = samples, y = counts, fill = samples)) +
-    geom_bar(colour = "black", stat = "identity", fill = c("yellow", col_cell)) +
+    ggplot(aes(x = sample, y = read_count, fill = sample_type)) +                          # Map sample to x, read_count to y, and sample_type to fill
+    geom_bar(colour = "black", stat = "identity") +                                        # Add bars with black borders
     geom_hline(yintercept = 8e+06, colour = "black") +                                     # Horizontal reference line
     theme_bw() +                                                                           # Classic black & white theme
-    labs(x = "Samples", y = "Read count") +                                                # Axis labels
-    ggeasy::easy_x_axis_labels_size(size = 10) +                                           # Adjust x-axis label size
+    labs(x = "Samples", y = "Read count", fill = NULL) +                                   # Label axes, remove default fill legend title
+    # ggeasy::easy_x_axis_labels_size(size = 10) +                                         # Option to adjust x-axis label size
     ggeasy::easy_y_axis_labels_size(size = 10) +                                           # Adjust y-axis label size
     ggeasy::easy_x_axis_title_size(size = 20) +                                            # Adjust x-axis title size
     ggeasy::easy_y_axis_title_size(size = 20) +                                            # Adjust y-axis title size
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +                             # Rotate x-axis labels
-    scale_y_continuous(labels = function(x) {
-      ifelse(x == 0, "0", paste0(format(x / 1e7, scientific = FALSE), " \u00D7 10\u2077")) # Use Unicode characters
-    })
-
+    # theme(axis.text.x = element_text(angle = 45, hjust = 1)) +                           # Option to rotate x-axis labels
+    theme(axis.text.x = element_blank(),                                                   # Remove x-axis text labels
+          axis.ticks.x = element_blank()) +                                                # Remove x-axis tick marks
+    scale_y_continuous(labels = function(x) {                                              # Format y-axis labels
+      ifelse(x == 0, "0", paste0(format(x / 1e7, scientific = FALSE), " \u00D7 10\u2077")) # Use Unicode for superscript
+    }) +
+    scale_fill_manual(values = c("yellow", col_cell), breaks = sum_data$sample_type) +     # Set colors manually
+    theme(legend.position = "bottom")                                                      # Place the legend at the bottom
+  
   return(read_count_barplot)
 }
-
 plot_lineage_trajectory_figure <- function(sce, lineage_column = "Lineage1", genes_of_interest = NULL) {
   
   new_lineage_column <- lineage_column %>% str_to_lower() %>% str_replace(pattern = "ge", replacement = "ge_")
