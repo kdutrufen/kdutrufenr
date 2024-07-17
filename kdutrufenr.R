@@ -3,6 +3,59 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+
+ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_count = 1e-9, ...) {
+   # Check for missing values
+  if (anyNA(data_matrix)) {
+    warning("Removing rows with missing values before calculating RLE.")
+    data_matrix <- na.omit(data_matrix)
+  }
+  
+  # 1. Calculate median (reference) values 
+  ref_values <- apply(data_matrix, 1, median)
+  # ref_values <- apply(data_matrix, 2, median)
+
+  # 2. Compute log ratios with pseudocount
+  pseudocount <- pseudo_count # Choose a small value appropriate for your data
+  log_ratio_matrix <- log2(sweep(data_matrix + pseudocount, 1, ref_values + pseudocount, "/"))
+
+  # 3. Create data frame for plotting
+  log_ratio_pivoted_df <- log_ratio_matrix %>%
+    as.data.frame() %>%
+    pivot_longer(cols = 1:ncol(.), names_to = "sample", values_to = "log_ratio") %>% 
+    left_join(design_df)
+  
+  # 4. Create the plot
+  log_ratio_pivoted_df %>%
+    ggplot(aes(x = sample, y = log_ratio, fill = condition)) +
+    geom_boxplot(
+      outlier.shape = NA, 
+      fatten = 2               # Increase fatten to have a larger median line in the box plot
+      ) + 
+    stat_boxplot(
+      geom ='errorbar', 
+      linetype = "dashed", 
+      width = 0.5
+      ) + 
+    geom_hline(yintercept = 0, linetype = "dashed") + # Add horizontal line at y = 0
+    ylim(y_lim) +
+    theme(
+      panel.grid = element_blank(), # Remove gridlines
+      panel.background = element_blank(), # Set panel background to blank
+      panel.border = element_rect(colour = "black", fill = NA, size = 1) # Add this line
+    ) +
+    theme(
+      axis.text.x = element_blank(), # Remove x-axis text labels
+      axis.ticks.x = element_blank()
+    ) +
+    labs(x = "Sample", y = "Relative Log Expression (RLE)", fill = NULL, title = title) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    ggeasy::easy_all_text_size(size = 15) +
+    scale_fill_manual(values = unname(polychrome())[1:length(unique(design_df[["condition"]]))]) +
+    theme(legend.position = "bottom")
+}
+
+
 create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
   # Input validation
   if (!is(sce, "SingleCellExperiment")) {
