@@ -5,7 +5,7 @@ library(parallelMap)
 
 
 ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_count = 1e-9, ...) {
-   # Check for missing values
+  # Check for missing values
   if (anyNA(data_matrix)) {
     warning("Removing rows with missing values before calculating RLE.")
     data_matrix <- na.omit(data_matrix)
@@ -14,11 +14,11 @@ ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_c
   # 1. Calculate median (reference) values 
   ref_values <- apply(data_matrix, 1, median)
   # ref_values <- apply(data_matrix, 2, median)
-
+  
   # 2. Compute log ratios with pseudocount
   pseudocount <- pseudo_count # Choose a small value appropriate for your data
   log_ratio_matrix <- log2(sweep(data_matrix + pseudocount, 1, ref_values + pseudocount, "/"))
-
+  
   # 3. Create data frame for plotting
   log_ratio_pivoted_df <- log_ratio_matrix %>%
     as.data.frame() %>%
@@ -28,15 +28,17 @@ ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_c
   # 4. Create the plot
   log_ratio_pivoted_df %>%
     ggplot(aes(x = sample, y = log_ratio, fill = condition)) +
-    geom_boxplot(
-      outlier.shape = NA, 
-      fatten = 2               # Increase fatten to have a larger median line in the box plot
-      ) + 
     stat_boxplot(
       geom ='errorbar', 
-      linetype = "dashed", 
+      linetype = "dashed",
+      # linetype = "dotted", 
       width = 0.5
-      ) + 
+    ) + 
+    geom_boxplot(
+      outlier.shape = NA,
+      fatten = 2,               # Increase fatten to have a larger median line in the box plot
+      coef = 0
+    ) +
     geom_hline(yintercept = 0, linetype = "dashed") + # Add horizontal line at y = 0
     ylim(y_lim) +
     theme(
@@ -55,118 +57,6 @@ ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_c
     theme(legend.position = "bottom")
 }
 
-
-create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
-  # Input validation
-  if (!is(sce, "SingleCellExperiment")) {
-    stop("Input 'sce' must be a SingleCellExperiment object.")
-  }
-  if (!is.character(gene_v) || !all(nzchar(gene_v))) {
-    stop("Input 'gene_v' must be a character vector of gene names.")
-  }
-  if (is.null(sce$pseudo_paths)) {
-    stop("Input 'sce' does not contain a 'pseudo_paths' slot.")
-  }
-  if (!all(gene_v %in% rownames(sce))) {
-    missing_genes <- gene_v[!gene_v %in% rownames(sce)]
-    warning(paste("The following genes are not found in 'sce':", paste(missing_genes, collapse = ", ")))
-    gene_v <- gene_v[gene_v %in% rownames(sce)]
-  }
-  
-  # gene_v <- gene_v %>%
-  #   intersect(row.names(sce)) %>%
-  #   sort() %>%
-  #   unique()
-
-  # Calculate TPM values
-  # sce@assays@data$tpm <- log2(cpm(sce@assays@data$counts) / 10 + 1) %>% as(Class = "dgCMatrix")
-  sce@assays@data$tpm <- (sce@assays@data$counts %>% cpm() %>% "/"(10)) %>% "+"(1) %>% log2() %>% as(Class = "dgCMatrix")
-
-  # Extract and pre-process pseudotime data
-  pseudo_paths <- sce$pseudo_paths
-  n_lineages <- pseudo_paths %>% ncol()
-  average_pseudo_time <- pseudo_paths %>% rowMeans(na.rm = TRUE)
-
-  # Create lineage specific pseudotime list
-  lineage_pseudo_time_list <- purrr::map(seq_len(n_lineages), function(i) pseudo_paths[, i]) %>% purrr::set_names(paste0("lineage_", 1:n_lineages))
-
-  # Long format TPM data function (helper)
-  to_long_tpm <- function(tpm_matrix, pseudo_time) {
-    tpm_matrix[rownames(tpm_matrix) %in% gene_v, ] %>%
-      t() %>%
-      as.data.frame() %>%
-      # rownames_to_column(var = "cell") %>%
-      mutate(pseudo_time = pseudo_time) %>%
-      drop_na(pseudo_time) %>%
-      arrange(pseudo_time) %>%
-      dplyr::select(-pseudo_time) %>%
-      # column_to_rownames(var = "cell") %>%
-      t() %>%
-      as.data.frame()
-  }
-
-  # Create lineage specific pseudotime dataframes
-  lineage_pseudo_list <- lineage_pseudo_time_list %>% purrr::map(to_long_tpm, tpm_matrix = sce@assays@data$tpm)
-
-  lineage_pseudo_list$average_pseudo <- to_long_tpm(sce@assays@data$tpm, average_pseudo_time)
-
-  return(lapply(lineage_pseudo_list, tibble))
-}
-
-    batch = as.character(sce$batch),
-    cell = colnames(sce)
-  ) %>%
-    cbind(sce$pseudo_paths)
-
-  # Extract relevant data
-  pseudo_paths_df <- sc_info_df %>%
-    rowwise() %>%
-    mutate(average = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
-    dplyr::select(cell, lineage_column, label, batch) %>%
-    drop_na(!!sym(lineage_column)) %>%
-    arrange(!!sym(lineage_column))
-
-  # Create plot
-  plot <- pseudo_paths_df %>%
-    ggplot(aes(x = 1:nrow(pseudo_paths_df), y = 1, fill = factor(!!sym(color_by)))) +
-    geom_tile() +
-    theme_void() +
-    # labs(x = NULL, y = NULL, fill = color_by) +
-    theme(legend.position = "bottom") +
-    guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
-
-  # Apply color palette based on color_by variable
-  if (color_by == "label") {
-    plot <- plot +
-      scale_fill_manual(values = unname(polychrome())) +
-      labs(x = NULL, y = NULL, fill = "Cluster") +
-      guides(fill = guide_legend(
-        override.aes = list(size = 3), # Adjust legend key size
-        nrow = 2,
-        label.position = "right",
-        title.position = "top", # Position title at the top
-        title.hjust = 0.5,
-        keywidth = unit(0.8, "cm")
-      ))
-  } else if (color_by == "batch") {
-    # Add logic for batch coloring if needed
-    plot <- plot +
-      scale_fill_manual(values = RColorBrewer::brewer.pal(n = length(unique(pseudo_paths_df$batch)), name = "Set1")) +
-      labs(x = NULL, y = NULL, fill = "Embryonic stage")
-  } else if (color_by == "pseudotime") {
-    # Add logic for batch coloring if needed
-    plot <- pseudo_paths_df %>%
-      ggplot(aes(x = 1:nrow(pseudo_paths_df), y = 1, fill = as.numeric(!!sym(lineage_column)))) +
-      geom_tile() +
-      theme_void() +
-      theme(legend.position = "bottom") +
-      guides(fill = guide_legend(title.position = "top", title.hjust = 0.5)) +
-      scale_fill_viridis(option = "viridis") +
-      labs(x = NULL, y = NULL, fill = paste("Pseudotime", lineage_column)) +
-      guides(fill = guide_colorbar(title.position = "top", label.position = "bottom"))  # Set legend title and position
-  }
-}
-                                         
 create_volcano_plot <- function(df, dot_size = 0.5){
   
   # Check for required columns
@@ -240,49 +130,6 @@ create_read_count_barplot <- function(read_count_df, design_df) {
   
   return(read_count_barplot)
 }
-plot_lineage_trajectory_figure <- function(sce, lineage_column = "Lineage1", genes_of_interest = NULL) {
-  
-  new_lineage_column <- lineage_column %>% str_to_lower() %>% str_replace(pattern = "ge", replacement = "ge_")
-  
-  trajectory_df_list <- create_gene_tpm_trajectory_dataframe(sce = sce, gene_v = genes)
-  
-  # Generate dendrogram and heatmap
-  if (new_lineage_column %in% names(trajectory_df_list)) {
-    dendro_heatmap_fig <- plot_dendro_heatmap_for_paper(trajectory_df_list[[new_lineage_column]])
-
-    # Create trajectory plots
-    label_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "label")
-    batch_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "batch")
-    sling_fig <- plot_lineage_trajectories(sce = sce, lineage_column = lineage_column, color_by = "pseudotime")
-
-    # Extract legends
-    dendro_legend <- get_legend(dendro_heatmap_fig$plt_hmap)
-    label_legend <- get_legend(label_fig)
-    batch_legend <- get_legend(batch_fig)
-    sling_legend <- get_legend(sling_fig)
-  
-    # Remove legends from individual plots
-    label_fig <- label_fig + theme(legend.position = "none")
-    batch_fig <- batch_fig + theme(legend.position = "none")
-    sling_fig <- sling_fig + theme(legend.position = "none")
-    dendro_heatmap_fig$plt_hmap <- dendro_heatmap_fig$plt_hmap + theme(legend.position = "none")
-    dendro_heatmap_fig$plt_dendr <- as.ggplot(dendro_heatmap_fig$plt_dendr)
-  
-    # Create combined figure
-    figure <- dendro_heatmap_fig$plt_hmap %>%
-      insert_top(plot = sling_fig, height = 1/20) %>%
-      insert_top(plot = batch_fig, height = 1/20) %>%
-      insert_top(plot = label_fig, height = 1/20) %>%
-      insert_left(plot = dendro_heatmap_fig$plt_dendr, width = 1/10)
-  
-    figure_legend <- ggdraw(label_legend) /
-      (ggdraw(dendro_legend) | ggdraw(batch_legend) | ggdraw(sling_legend))
-  
-    return(as.ggplot(figure) / figure_legend)
-  } else {
-    stop(paste0(lineage_column, "' not found in the data."))
-  }
-}
 
 get_attribute_field = function (x, field, attrsep = "; ") 
 {
@@ -350,7 +197,7 @@ shape_data <- function(ora_results_output) {
   return(ora_results_output)
 }
 
-gsea_analysis <- function(database = KEGG_2019_Mouse, sorted_genes, p_value_cutoff = 0.05, p_adjust_cutoff = 0.05, min_size = 10, max_size = 500, p_adjust_method = "BH") {
+gsea_analysis <- function(database = KEGG_2019_Mouse, sorted_genes, p_value_cutoff = 0.05, p_adjust_cutoff = 0.05, min_size = 10, max_size = 500, p_adjust_method = "BH", seed = 123) {
   
   # Load required packages
   library(clusterProfiler)
@@ -365,6 +212,7 @@ gsea_analysis <- function(database = KEGG_2019_Mouse, sorted_genes, p_value_cuto
     purrr::map("gene")
   
   # Perform Gene Set Enrichment Analysis (GSEA) using the sorted_genes and the database
+  set.seed(seed)
   gsea_result <- clusterProfiler::GSEA(
     geneList = sorted_genes, 
     TERM2GENE = gmt_df, 
@@ -393,7 +241,6 @@ gsea_analysis <- function(database = KEGG_2019_Mouse, sorted_genes, p_value_cuto
   # Return the results
   return(results)
 }
-
 
 go_gsea_analysis <- function(sorted_genes, database = GO_Biological_Process_2018, p_AdjustMethod = "BH", min_Size = 15, max_Size = 500, n_perm = 10000, n_proc = 0, pvalue_cutoff = 1, qvalue_cutoff = 1, p.adjust_cutoff = 0.1, exponent = 1) {
   library(clusterProfiler)
