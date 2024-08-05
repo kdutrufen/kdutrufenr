@@ -194,7 +194,7 @@ ora_analysis <- function(genes_list, database = KEGG_2019_Human, pvalue_cutoff =
   # Extract the gene sets (terms) from the GMT data frame
   terms_list <- gmt_df %>%
     split(f = .$term) %>%
-    purrr::map(pull, gene)
+    purrr::map(function(x) x %>% .[["gene"]])
   
   # Get the unique set of genes present in the database
   genes_set <- gmt_df[, "gene"] %>% unique()
