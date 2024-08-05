@@ -3,6 +3,29 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+is_mar <- function(model) {
+  # Calculate the p-values from the z-values for each predictor variable
+  coefficients <- summary(model)$coefficients[, "Estimate"]
+  standard_errors <- summary(model)$coefficients[, "Std. Error"]
+  z_values <- coefficients / standard_errors
+  p_values <- 2 * (1 - pnorm(abs(z_values)))
+
+  # Compare the p-values with the significance level (e.g., 0.05)
+  significance_level <- 0.05
+  is_mar <- all(p_values > significance_level)
+
+  # Print the p-values and conclusion
+  print("P-Values:")
+  print(p_values)
+
+  print("Conclusion:")
+  if (is_mar) {
+    print("The data is Missing at Random (MAR).")
+  } else {
+    print("The data is not Missing at Random (not MAR).")
+  }
+}
+
 create_chord_diagram <- function(data, title_text, combined_score_threshold) {
   # mar = c(bottom, left, top, right) 
   # par(cex = 1.2, mar = c(4.1, 4.1, 4.1, 4.1))
