@@ -3,6 +3,29 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_imputation_spaghetti_plot <- function(long_df, column_name, title) {
+  # Check if column_name exists in the data frame
+  if (!(column_name %in% colnames(long_df))) {
+    stop(paste("Error: Column", column_name, "not found in the data frame."))
+  }
+
+  long_df %>%
+    arrange(imputed_data) %>%
+    ggplot(aes(x = time, y = !!sym(column_name), color = imputed_data, group = wound_id)) +
+    geom_point() +
+    scale_color_manual(values = c("yes" = "purple", "no" = "gray")) +
+    geom_line(alpha = 0.4) +
+    theme_bw() +
+    facet_wrap(~treatment) +
+    scale_x_discrete(limits = c(0, 2, 5, 10)) +
+    ggeasy::easy_text_size(size = 20) +
+    ggeasy::easy_x_axis_labels_size(size = 15) +
+    ggeasy::easy_y_axis_labels_size(size = 15) +
+    labs(x = "Time Post-Bite (Day)", y = bquote("Necrotic Area "(cm^2)), color = "Imputed data", title = title) +
+    theme(legend.position = "bottom") +
+    guides(color = guide_legend(title.position = "top"))
+}
+
 is_mar <- function(model) {
   # Calculate the p-values from the z-values for each predictor variable
   coefficients <- summary(model)$coefficients[, "Estimate"]
