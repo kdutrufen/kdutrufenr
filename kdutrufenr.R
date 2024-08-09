@@ -52,8 +52,10 @@ is_mar <- function(model) {
 create_chord_diagram <- function(data, title_text, combined_score_threshold, display_gene_names = F) {
   # mar = c(bottom, left, top, right)
   # par(cex = 1.2, mar = c(4.1, 4.1, 4.1, 4.1))
+  circos.clear()
+  
   par(cex = 1.2, mar = c(1, 4, 2, 4)) # Smaller margins
-
+  
   circos.par(circle.margin = 0.5)
 
   data %>%
