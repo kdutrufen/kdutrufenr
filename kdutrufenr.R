@@ -49,15 +49,15 @@ is_mar <- function(model) {
   }
 }
 
-create_chord_diagram <- function(data, title_text, combined_score_threshold) {
-  # mar = c(bottom, left, top, right) 
+create_chord_diagram <- function(data, title_text, combined_score_threshold, display_gene_names = F) {
+  # mar = c(bottom, left, top, right)
   # par(cex = 1.2, mar = c(4.1, 4.1, 4.1, 4.1))
-  par(cex = 1.2, mar = c(1, 4, 2, 4))  # Smaller margins
+  par(cex = 1.2, mar = c(1, 4, 2, 4)) # Smaller margins
 
   circos.par(circle.margin = 0.5)
-  
+
   data %>%
-    dplyr::filter(combined_score >= combined_score_threshold) %>% 
+    dplyr::filter(combined_score >= combined_score_threshold) %>%
     dplyr::select(c("#node1", "node2", "combined_score", "color")) %>%
     chordDiagram(
       annotationTrack = "grid",
@@ -68,22 +68,23 @@ create_chord_diagram <- function(data, title_text, combined_score_threshold) {
   # Add the title
   title(title_text, cex.main = 2, font.main = 1) # Adjust cex.main and font.main as needed
 
-  # circos.track(track.index = 1, track.height = 2, panel.fun = function(x, y) {
-  #   circos.text(
-  #     CELL_META$xcenter,
-  #     CELL_META$ylim[2],
-  #     CELL_META$sector.index,
-  #     facing = "clockwise",
-  #     niceFacing = TRUE,
-  #     adj = c(0, 0.5),
-  #     cex = 1
-  #   )
-  # }, bg.border = NA) # here set bg.border to NA is important
-
+  if (display_gene_names) {
+    circos.track(track.index = 1, track.height = 2, panel.fun = function(x, y) {
+      circos.text(
+        CELL_META$xcenter,
+        CELL_META$ylim[2],
+        CELL_META$sector.index,
+        facing = "clockwise",
+        niceFacing = TRUE,
+        adj = c(0, 0.5),
+        cex = 1
+      )
+    }, bg.border = NA) # here set bg.border to NA is important
+  }
 
   chord_diagram_plot <- recordPlot()
   # circos.clear()
-} 
+}
 
 ggplot_RLE <- function(data_matrix, design_df, title, y_lim = c(-2, 2), pseudo_count = 1e-9, ...) {
   # Check for missing values
