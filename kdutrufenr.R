@@ -49,7 +49,7 @@ is_mar <- function(model) {
   }
 }
 
-create_chord_diagram <- function(data, title_text, combined_score_threshold, display_gene_names = F) {
+create_chord_diagram <- function(stringDB_data, title_text, combined_score_threshold, display_gene_names = F) {
   # mar = c(bottom, left, top, right)
   # par(cex = 1.2, mar = c(4.1, 4.1, 4.1, 4.1))
   circos.clear()
@@ -58,7 +58,7 @@ create_chord_diagram <- function(data, title_text, combined_score_threshold, dis
   
   circos.par(circle.margin = 0.5)
 
-  data %>%
+  stringDB_data %>%
     dplyr::filter(combined_score >= combined_score_threshold) %>%
     dplyr::select(c("#node1", "node2", "combined_score", "color")) %>%
     chordDiagram(
