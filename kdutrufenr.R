@@ -3,6 +3,30 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+include_de_results <- function(sce, top_threshold) {
+  markers <- sce %>% findMarkers(test = "binom", direction = "up", lfc = 1, pval.type = "any", groups = .$cell_type)
+  markers_list <- purrr::map(seq_along(markers), function(i) markers[[i]])
+  markers_list <- markers_list %>% purrr::set_names(sce$cell_type %>% levels())
+  de_list <- purrr::map(seq_along(markers), function(i) {
+    markers_list[[i]] %>%
+      as.data.frame() %>%
+      dplyr::filter(FDR <= 0.05 & summary.logFC >= 1.0 & Top <= top_threshold)
+  }) %>%
+    purrr::set_names(sce$cell_type %>% levels())
+
+  de_list <- de_list %>%
+    purrr::map(mutate_at, .vars = c("p.value", "FDR"), .funs = formatC, digits = 2, format = "e") %>%
+    purrr::map(mutate_if, .predicate = is.numeric, .funs = round, digits = 2)
+
+  de_list <- de_list %>%
+    purrr::map(rownames_to_column, var = "gene")
+
+  # Add as a new assay
+  metadata(sce)$de_results <- de_list
+  
+  return(sce)
+}
+                             
 create_imputation_spaghetti_plot <- function(long_df, column_name, title) {
   # Check if column_name exists in the data frame
   if (!(column_name %in% colnames(long_df))) {
