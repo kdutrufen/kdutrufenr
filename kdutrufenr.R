@@ -3,6 +3,32 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_sce_from_seurat <- function(seurat_object){
+  
+  # Extract counts from the Seurat object, using the 'raw' assay
+  counts <- GetAssayData(seurat_object, slot = "counts", assay = "RNA")
+
+  # Create the SingleCellExperiment object
+  sce <- SingleCellExperiment(
+    assays = list(counts = counts),
+    colData = seurat_object@meta.data 
+    )
+
+  # Add rowData if available in the Seurat object
+  if (!is.null(seurat_object@assays$RNA@meta.features)) {
+    rowData(sce) <- seurat_object@assays$RNA@meta.features
+  }
+  
+  # Extract the UMAP coordinates from the Seurat object
+  umap_coords <- seurat_object@reductions$umap@cell.embeddings %>% as.data.frame() %>% as.matrix()
+  # umap_coords <- final_meta_dataset@reductions$integrated_UMAP
+  
+  # Add the UMAP coordinates to the reducedDims slot of the sce object
+  reducedDims(sce) <- SimpleList(UMAP = umap_coords)
+  
+  return(sce)
+}
+
 include_de_results <- function(sce, top_threshold) {
   markers <- sce %>% findMarkers(test = "binom", direction = "up", lfc = 1, pval.type = "any", groups = .$cell_type)
   markers_list <- purrr::map(seq_along(markers), function(i) markers[[i]])
