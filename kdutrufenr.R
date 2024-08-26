@@ -3,6 +3,35 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+extract_edges <- function(dend) {
+  if(is.leaf(dend)) {
+    # Create a 'singleton' edge for each leaf
+    return(data.frame(
+      from = attr(dend, "label"),    # Use the leaf label directly
+      to = attr(dend, "label"),
+      height = 0                     # Height is 0 for leaf nodes
+    ))
+  } else {
+    left_edges <- extract_edges(dend[[1]])
+    right_edges <- extract_edges(dend[[2]])
+
+    # Create a unique ID for the internal node 
+    node_id <- paste0("node_", attr(dend, "members") + 1)
+
+    new_edges <- data.frame(
+      from = node_id,
+      to = c(
+        if (is.leaf(dend[[1]])) attr(dend[[1]], "label") else paste0("node_", attr(dend[[1]], "members") + 1),
+        if (is.leaf(dend[[2]])) attr(dend[[2]], "label") else paste0("node_", attr(dend[[2]], "members") + 1)
+      ),
+      height = attr(dend, "height")
+    )
+
+    return(rbind(left_edges, right_edges, new_edges))
+  }
+}
+
+
 create_sce_from_seurat <- function(seurat_object){
   
   # Extract counts from the Seurat object, using the 'raw' assay
