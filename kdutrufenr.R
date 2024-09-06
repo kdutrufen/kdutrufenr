@@ -3,6 +3,27 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+get_filtered_deg_set <- function(gsea_results, gseaplot_results, edgeR_topDE, description) {
+
+  # Extract core enrichment based on description
+  core_enrichment <- gsea_results@result$core_enrichment[gsea_results@result$Description == description]
+
+  # Uncomment if you need to access gseaplot_results
+  # gseaplot_result <- gseaplot_results[[description]] 
+
+  # Get deg_set using str_detect
+  deg_set <- str_detect(
+    string = core_enrichment, 
+    pattern = str_to_upper(edgeR_topDE$mgi_symbol)
+  )
+
+  # Filter edgeR_topDE based on deg_set
+  filtered_deg_set <- edgeR_topDE %>% 
+    dplyr::filter(mgi_symbol %in% edgeR_topDE$mgi_symbol[deg_set])
+
+  return(filtered_deg_set)
+}
+
 extract_edges <- function(dend) {
   if(is.leaf(dend)) {
     # Create a 'singleton' edge for each leaf
