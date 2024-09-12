@@ -3,6 +3,74 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+run_cemitool_pipeline <- function(cem,
+                                  sample_annotation_df,
+                                  database = KEGG_2019_Human,
+                                  int_df = NULL,
+                                  n_cores = parallel::detectCores() - 1) {
+  library(CEMiTool)
+  library(tidyverse)
+  library(parallelMap)
+  
+  cem@selected_genes <- cem@selected_genes %>% str_to_upper()
+  
+  # Set parallel backend (using available cores, leaving one free)
+  parallelStartSocket(n_cores)
+  
+  # Module identification
+  cem <- cem %>%
+    find_modules(
+      cor_method = "pearson",
+      cor_function = "cor",
+      eps = 0.1,
+      min_ngen = 20,
+      merge_similar = TRUE,
+      diss_thresh = 0.75,
+      network_type = "unsigned",
+      tom_type = "signed",
+      verbose = FALSE,
+      force_beta = TRUE,
+      set_beta = NULL
+    )
+  
+  cem@module <- cem@module %>% 
+    mutate(genes = genes %>% str_to_upper())
+  # Visualization of module properties (mean connectivity, beta, and gene expression profiles)
+  cem <- cem %>% plot_mean_k(title = "Mean connectivity")
+  cem <- cem %>% plot_beta_r2()
+  cem <- cem %>% plot_profile()
+  
+  # Extract selected genes for downstream analysis
+  genes <- cem %>%
+    unclass() %>%
+    attr("selected_genes")
+  
+  # Add sample annotation to the CEMiTool object
+  sample_annotation(cem, sample_name_column = "sample_name", class_column = "class") <- sample_annotation_df
+  
+  # Gene Set Enrichment Analysis (GSEA)
+  cem <- cem %>% mod_gsea()
+  cem <- cem %>% plot_gsea()
+  
+  # Over-Representation Analysis (ORA)
+  gmt_in <- database %>% read_gmt()
+  cem <- cem %>% mod_ora(gmt_in)
+  cem <- cem %>% plot_ora(n = 20, pv_cut = 0.05)
+  
+  # Interactions Analysis (if applicable)
+  if (!is.null(int_df)) { # Check if int_df exists
+    interactions_data(cem) <- int_df
+    cem <- cem %>% plot_interactions()
+  } else {
+    message("Skipping interactions analysis: 'int_df' not provided.")
+  }
+  
+  # Stop parallel processing
+  parallelStop()
+  
+  return(cem)
+}
+
 get_filtered_deg_set <- function(gsea_results, gseaplot_results, edgeR_topDE, description) {
 
   # Extract core enrichment based on description
