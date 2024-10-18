@@ -3,18 +3,293 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+
+calculate_network_measures <- function(igraph_object) {
+  pacman::p_load(centiserve)
+  pacman::p_load(igraph)
+  
+  # Get the adjacency matrix of your network
+  adjacency_matrix <- as_adjacency_matrix(igraph_object, names = FALSE)
+  
+  # Calculate the maximum eigenvalue
+  max_eigenvalue <- max(eigen(adjacency_matrix)$values)
+  
+  # Calculate the upper limit for alpha
+  alpha_limit <- 1 / max_eigenvalue
+  
+  # Choose a valid alpha (ensure it's less than alpha_limit and within 0-0.2)
+  valid_alpha <- min(0.1, alpha_limit / 2) 
+  
+  centrality_df <- data.frame(
+    # identify hubs
+    degree_centrality = igraph::degree(igraph_object, normalized = FALSE),
+    # Calculate betweenness centrality
+    betweenness_centrality = igraph::betweenness(igraph_object, directed = FALSE, weights = NULL),
+    # Calculate closeness centrality
+    closeness_centrality = igraph::closeness(igraph_object, mode = "all", weights = NULL, normalized = TRUE),
+    # Calculate eigenvector centrality
+    eigenvector_centrality = igraph::eigen_centrality(igraph_object, weights = NULL)$vector,
+    # Entropy centrality measures centrality of nodes depending on their contribution to the entropy of the graph.
+    entropy_centrality = centiserve::entropy(igraph_object, weights = NULL),
+    # Katz centrality (Katz Status Index)
+    katz_centrality = centiserve::katzcent(igraph_object, alpha = valid_alpha),
+    # Topological coefficient quantifies the extent to which a node shares neighbors with other nodes. Nodes with high topological coefficients tend to have neighbors that are also connected to each other.
+    topological_coefficient = topocoefficient(igraph_object),
+    hubness_score = hub_score(igraph_object, weights = NULL)$vector
+  )
+  
+  return(centrality_df)
+}
+
+
+get_coexpression_hubs <- function(cem) {
+  all_degrees <- intramodularConnectivity(
+    adjMat = cem@adjacency,
+    colors = cem@module$modules
+  )
+  
+  all_degrees <- all_degrees %>%
+    rownames_to_column(var = "gene") %>%
+    mutate_if(is.numeric, ~ round(., digits = 2)) %>%
+    column_to_rownames(var = "gene")
+  
+  hubness_by_module_df <- all_degrees %>%
+    mutate(module = cem@module$modules) %>%
+    split(f = .$module) %>%
+    purrr::map(function(x) {
+      x %>%
+        dplyr::select(-module) %>%
+        rownames_to_column(var = "gene") %>%
+        arrange(desc(kTotal))
+    }) %>%
+    bind_rows(.id = "module")
+  
+  return(hubness_by_module_df)
+}
+
+
+plot_deg_interaction <- function(ig_obj, n = 10, color = "blue", name, degs_by_comparison) {
+  degrees <- igraph::degree(ig_obj, normalized = FALSE)
+  ig_obj <- igraph::set_vertex_attr(ig_obj, "degree", value = degrees)
+  max_n <- min(n, length(degrees))
+  net_obj <- intergraph::asNetwork(ig_obj)
+  network_adjacency_matrix <- network::as.matrix.network.adjacency(net_obj) # get sociomatrix
+  # get coordinates from Fruchterman and Reingold's force-directed placement algorithm.
+  plotcord <- data.frame(sna::gplot.layout.fruchtermanreingold(network_adjacency_matrix, NULL))
+  colnames(plotcord) <- c("X1", "X2")
+  edglist <- network::as.matrix.network.edgelist(net_obj)
+  edges <- data.frame(plotcord[edglist[, 1], ], plotcord[edglist[, 2], ])
+  plotcord$vertex.names <- as.factor(network::get.vertex.attribute(net_obj, "vertex.names"))
+  plotcord$Degree <- network::get.vertex.attribute(net_obj, "degree")
+  plotcord[, "shouldLabel"] <- FALSE
+  plotcord[, "Hub"] <- ""
+  # Example: Select top 10% of vertices as hubs
+  threshold <- quantile(degrees, 0.9)  
+  int_hubs <- names(sort(degrees, decreasing = TRUE))[1:max_n]
+  int_hubs <- int_hubs[degrees[int_hubs] >= threshold]
+  int_bool <- plotcord[, "vertex.names"] %in% int_hubs
+  plotcord[which(int_bool), "Hub"] <- "Interaction"
+  sel_vertex <- int_hubs
+  
+  colnames(edges) <- c("X1", "Y1", "X2", "Y2")
+  # edges$midX  <- (edges$X1 + edges$X2) / 2
+  # edges$midY  <- (edges$Y1 + edges$Y2) / 2
+  plotcord[which(plotcord[, "vertex.names"] %in% sel_vertex), "shouldLabel"] <- TRUE
+  plotcord$Degree_cut <- cut(plotcord$Degree, breaks = 3, labels = FALSE)
+  plotcord$in_mod <- TRUE
+  # degs_by_comparison <- cem@module[cem@module$modules==name,]$genes
+  not_in <- setdiff(plotcord[, "vertex.names"], degs_by_comparison)
+  plotcord[which(plotcord[, "vertex.names"] %in% not_in), "in_mod"] <- FALSE
+  
+  pl <- ggplot(plotcord) +
+    geom_segment(
+      data = edges, aes(x = X1, y = Y1, xend = X2, yend = Y2),
+      linewidth = 0.5, alpha = 0.5, colour = "#DDDDDD"
+    ) +
+    geom_point(aes(x = X1, y = X2, size = Degree, alpha = Degree), color = color) +
+    geom_label_repel(aes(x = X1, y = X2, label = vertex.names, color = Hub),
+                     box.padding = unit(1, "lines"),
+                     data = function(x) {
+                       x[x$shouldLabel, ]
+                     }
+    ) +
+    scale_colour_manual(values = c(
+      "Co-expression" = "#005E87",
+      "Interaction" = "#540814",
+      "Co-expression + Interaction" = "#736E0B"
+    )) +
+    labs(title = name) +
+    ggplot2::theme_bw(base_size = 12, base_family = "") +
+    ggplot2::theme(
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      axis.title = ggplot2::element_blank(),
+      legend.key = ggplot2::element_blank(),
+      panel.background = ggplot2::element_rect(
+        fill = "white",
+        colour = NA
+      ),
+      panel.border = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_blank()
+    )
+  
+  return(pl)
+}
+
+get_plot_colors <- function(deg_interaction_list) {
+  all_colors <- colors()
+  
+  # Function to check if a color is a shade of grey
+  is_grey <- function(color) {
+    rgb_values <- col2rgb(color)
+    max_diff <- max(abs(diff(rgb_values)))
+    return(max_diff < 20) # Adjust the threshold (20) as needed
+  }
+  
+  # Filter out grey colors
+  color_list <- all_colors[!sapply(all_colors, is_grey)]
+  
+  set.seed(123)
+  color_list <- sample(color_list, size = length(deg_interaction_list)) %>% purrr::set_names(names(deg_interaction_list))
+  return(color_list)
+}
+
+
+plot_heatmap_and_dendro <- function(df) {
+  library(cowplot)
+  library(ggdendro)
+  library(tidyverse)
+  
+  sample_names <- names(df)
+  # Calculate the dendrogram
+  dend <- df %>%
+    # column_to_rownames(var = "Gene") %>%
+    as.matrix() %>%
+    dist() %>%
+    hclust() %>%
+    as.dendrogram()
+  
+  dend_data <- dend %>% dendro_data()
+  
+  # Setup the data, so that the layout is inverted (this is more
+  # "clear" than simply using coord_flip())
+  segment_data <- with(
+    segment(dend_data),
+    data.frame(x = y, y = x, xend = yend, yend = xend)
+  )
+  
+  # Use the dendrogram label data to position the gene labels
+  gene_pos_table <- with(
+    dend_data$labels,
+    data.frame(y_center = x, Gene = as.character(label), height = 1)
+  )
+  
+  # Table to position the samples
+  sample_pos_table <- data.frame(Sample = sample_names) %>%
+    mutate(x_center = (1:nrow(.)), width = 1)
+  
+  # Neglecting the gap parameters
+  heatmap_data <- df %>%
+    rownames_to_column("Gene") %>%
+    gather(value = "expr", key = "Sample", -Gene) %>%
+    # reshape2::melt(value.name = "expr", varnames = c("Gene", "Sample")) %>%
+    left_join(gene_pos_table) %>%
+    left_join(sample_pos_table)
+  
+  # Limits for the vertical axes
+  gene_axis_limits <- with(
+    gene_pos_table,
+    c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+  ) +
+    0.1 * c(-1, 1) # extra spacing: 0.1
+  
+  max_expr <- max(abs(floor(min(heatmap_data$expr, na.rm = T))), abs(ceiling(max(heatmap_data$expr, na.rm = T))))
+  
+  # Heatmap plot
+  plt_hmap <- ggplot(
+    heatmap_data,
+    aes(
+      x = x_center, y = y_center, fill = expr,
+      height = height, width = width
+    )
+  ) +
+    geom_tile() +
+    # scale_fill_gradient2("Expr", high = "red", low = "blue") +
+    scale_fill_gradientn("log2FC", 
+                         limits = c(-1*max_expr, max_expr),
+                         colours = rev(colorRampPalette(colors = c("red", "white", "#094FED"))(50))) +
+    scale_x_continuous(
+      breaks = sample_pos_table$x_center,
+      labels = sample_pos_table$Sample,
+      expand = c(0, 0)
+    ) +
+    # For the y axis, alternatively set the labels as: gene_position_table$gene
+    scale_y_continuous(
+      breaks = gene_pos_table[, "y_center"],
+      # labels = rep("", nrow(gene_pos_table)),
+      labels = heatmap_data %>% arrange(y_center) %>% pull(Gene) %>% unique(),
+      limits = gene_axis_limits,
+      expand = c(0, 0),
+      position = "right"
+    ) +
+    labs(x = "Treatment", y = "") +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(size = rel(1), hjust = 0.5, angle = 0),
+      # margin: top, right, bottom, and left
+      plot.margin = unit(c(1, 0.2, 0.2, -0.7), "cm"),
+      panel.grid.minor = element_blank()
+    ) +
+    ggeasy::easy_all_text_size(size = 20) +
+    ggeasy::easy_y_axis_labels_size(size = 0) +
+    ggeasy::easy_rotate_x_labels(angle = 90)
+  
+  # Dendrogram plot
+  plt_dendr <- ggplot(segment_data) +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
+    scale_x_reverse(expand = c(0, 0.5)) +
+    scale_y_continuous(
+      breaks = gene_pos_table$y_center,
+      labels = gene_pos_table$Gene,
+      # labels = NULL,
+      limits = gene_axis_limits,
+      expand = c(0, 0)
+    ) +
+    labs(x = "Distance", y = "", colour = "", size = "") +
+    theme(panel.grid.minor = element_blank()) +
+    theme_bw() +
+    ggeasy::easy_all_text_size(size = 20)
+  
+  # results <- list(
+  # heatmap = plot_grid(plt_dendr, plt_hmap, align = "h", rel_widths = c(1, 1)),
+  # heatmap_data = 
+  # )
+  
+  cowplot::plot_grid(plt_dendr, plt_hmap, align = "h", rel_widths = c(0.4, 1))
+}
+
 run_cemitool_pipeline <- function(cem,
                                   sample_annotation_df,
                                   database = KEGG_2019_Human,
                                   int_df = NULL,
                                   n_cores = parallel::detectCores() - 1) {
-  library(CEMiTool)
-  library(tidyverse)
-  library(parallelMap)
+  pacman::p_load(doParallel, 
+                 CEMiTool, 
+                 tidyverse,
+                 parallelMap)
   
   cem@selected_genes <- cem@selected_genes %>% str_to_upper()
   
-  # Set parallel backend (using available cores, leaving one free)
+  # # Set the number of cores to use
+  # n_cores <- n_cores  # Or however many cores you want to utilize
+  # 
+  # # Create a parallel cluster
+  # cl <- makeCluster(n_cores)
+  # 
+  # # Register the parallel backend
+  # registerDoParallel(cl)
+  
+  # # Set parallel backend (using available cores, leaving one free)
   parallelStartSocket(n_cores)
   
   # Module identification
@@ -60,7 +335,13 @@ run_cemitool_pipeline <- function(cem,
   # Interactions Analysis (if applicable)
   if (!is.null(int_df)) { # Check if int_df exists
     interactions_data(cem) <- int_df
-    cem <- cem %>% plot_interactions()
+    genes_by_module <- split(cem@module$genes, cem@module$modules)
+    cem@interactions <- genes_by_module %>% purrr::map(function(x) {
+      rows <- which(int_df[[1]] %in% x & int_df[[2]] %in% x)
+      ig <- igraph::simplify(igraph::graph_from_data_frame(int_df[rows,], directed=FALSE))
+      return(ig)
+    })
+    
   } else {
     message("Skipping interactions analysis: 'int_df' not provided.")
   }
