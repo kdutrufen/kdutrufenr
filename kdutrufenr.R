@@ -3,6 +3,36 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+combine_gsea_results <- function(gsea_results_list, comparison_names, cluster_labels) {
+  # Combine GSEA results into a compareClusterResult object
+  
+  result_list <- list()
+  # Add cluster labels to each result
+  for (i in seq_along(gsea_results_list)) {
+    result_list[[i]] <- gsea_results_list[[i]]$gsea_results@result
+    result_list[[i]]$Cluster <- cluster_labels[i]
+  }
+  
+  # Combine results into a single data frame
+  combined_results <- result_list %>%
+    bind_rows()
+  
+  # Create compareClusterResult object
+  compare_cluster_obj <- new("compareClusterResult",
+                             compareClusterResult = combined_results,
+                             geneClusters = gsea_results_list %>%
+                               purrr::map("gsea_results") %>%
+                               purrr::map("@geneList"),
+                             fun = "GSEA")
+  
+  # Reorder the levels of the 'Cluster' column
+  compare_cluster_obj@compareClusterResult$Cluster <- factor(
+    compare_cluster_obj@compareClusterResult$Cluster,
+    levels = cluster_labels  # Use the provided cluster_labels for ordering
+  )
+  
+  return(compare_cluster_obj)
+}
 
 calculate_network_measures <- function(igraph_object) {
   pacman::p_load(centiserve)
