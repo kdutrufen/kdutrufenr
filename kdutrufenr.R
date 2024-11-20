@@ -34,6 +34,44 @@ combine_gsea_results <- function(gsea_results_list, comparison_names, cluster_la
   return(compare_cluster_obj)
 }
 
+calculate_network_measures_parallel <- function(igraph_object, n_cores = detectCores() - 2) {
+  pacman::p_load(centiserve)
+  pacman::p_load(igraph)
+  pacman::p_load(parallel)
+  
+  # Get the adjacency matrix of your network
+  adjacency_matrix <- as_adjacency_matrix(igraph_object, names = FALSE)
+  
+  # Calculate the maximum eigenvalue
+  max_eigenvalue <- max(eigen(adjacency_matrix)$values)
+  
+  # Calculate the upper limit for alpha
+  alpha_limit <- 1 / max_eigenvalue
+  
+  # Choose a valid alpha (ensure it's less than alpha_limit and within 0-0.2)
+  valid_alpha <- min(0.1, alpha_limit / 2) 
+  
+  # List of functions to be applied in parallel
+  centrality_functions <- list(
+    degree_centrality = function(g) igraph::degree(g, normalized = FALSE),
+    betweenness_centrality = function(g) igraph::betweenness(g, directed = FALSE, weights = NULL),
+    closeness_centrality = function(g) igraph::closeness(g, mode = "all", weights = NULL, normalized = TRUE),
+    eigenvector_centrality = function(g) igraph::eigen_centrality(g, weights = NULL)$vector,
+    # entropy_centrality = function(g) centiserve::entropy(g, weights = NULL),
+    katz_centrality = function(g) centiserve::katzcent(g, alpha = valid_alpha),
+    # topological_coefficient = function(g) igraph::topocoefficient(g),
+    hubness_score = function(g) igraph::hub_score(g, weights = NULL)$vector
+  )
+  
+  # Apply the functions in parallel
+  centrality_results <- mclapply(centrality_functions, function(f) f(igraph_object), mc.cores = n_cores)
+  
+  # Combine results into a data frame
+  centrality_df <- as.data.frame(centrality_results)
+  
+  return(centrality_df)
+}
+                                 
 calculate_network_measures <- function(igraph_object) {
   pacman::p_load(centiserve)
   pacman::p_load(igraph)
