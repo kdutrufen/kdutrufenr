@@ -135,6 +135,84 @@ get_coexpression_hubs <- function(cem) {
   return(hubness_by_module_df)
 }
 
+                                 
+new_plot_network_interaction_v2 <- function(ig_obj, n = 10, color = "blue") {
+  # Calculates Degree
+  degrees <- ig_obj %>% igraph::degree(normalized = FALSE)
+  ig_obj <- ig_obj %>% igraph::set_vertex_attr("degree", value = degrees)
+  max_n <- min(n, length(degrees))
+
+  # Get adjacency matrix and coordinates directly from igraph
+  adj_matrix <- igraph::as_adjacency_matrix(ig_obj) %>% as.matrix()
+  
+  # Convert igraph adjacency matrix to network object for sna
+  # net_obj <- network::network(adj_matrix, directed = FALSE)
+  
+  # Get layout coordinates using sna
+  # plot_coord <- as.data.frame(sna::gplot.layout.fruchtermanreingold(network::as.matrix.network.adjacency(net_obj), NULL))
+  # plot_coord <- as.data.frame(igraph::layout_with_fr(ig_obj)) # Use igraph's layout function
+  plot_coord <- as.data.frame(igraph::layout_nicely(ig_obj))
+  plot_coord <- plot_coord %>% purrr::set_names("X1", "X2")
+  
+  # Get edge list from igraph (numeric indices)
+  edge_list <- igraph::get.edgelist(ig_obj, names = FALSE) # Get numeric indices
+
+  # Create a mapping from vertex names to indices for efficient lookup
+  vertex_index_map <- setNames(seq_along(igraph::V(ig_obj)), igraph::V(ig_obj)$name)
+
+  # Get vertex names and add to plot_coord
+  vertex_names <- igraph::V(ig_obj)$name
+  plot_coord$vertex_names <- vertex_names
+  plot_coord$degree <- degrees
+  
+  # Identify hubs
+  threshold <- quantile(degrees, 0.9)
+  int_hubs <- names(sort(degrees, decreasing = TRUE)[1:max_n])
+  int_hubs <- int_hubs[degrees[int_hubs] >= threshold]
+  plot_coord$hub <- ifelse(plot_coord$vertex_names %in% int_hubs, "Interaction", "")
+  
+  # Prepare data for ggplot
+  plot_coord$degree_cut <- cut(plot_coord$degree, breaks = 3, labels = FALSE)
+  
+  # Construct edges dataframe using numeric indices
+  edges <- data.frame(
+    X1 = plot_coord[edge_list[, 1], "X1"],
+    Y1 = plot_coord[edge_list[, 1], "X2"],
+    X2 = plot_coord[edge_list[, 2], "X1"],
+    Y2 = plot_coord[edge_list[, 2], "X2"]
+  )
+
+  # Define custom ggplot theme
+  network_theme <- ggplot2::theme_bw(base_size = 12, base_family = "") +
+    ggplot2::theme(
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      axis.title = ggplot2::element_blank(),
+      legend.key = ggplot2::element_blank(),
+      panel.background = ggplot2::element_rect(fill = "white", colour = NA),
+      panel.border = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_blank()
+    )
+  
+  # Create plot
+  pl <- ggplot(plot_coord) +
+    geom_segment(
+      data = edges,
+      aes(x = X1, y = Y1, xend = X2, yend = Y2),
+      linewidth = 0.5, alpha = 0.5, colour = "#DDDDDD"
+    ) +
+    geom_point(aes(x = X1, y = X2, size = degree, alpha = degree), color = color) +
+    ggrepel::geom_label_repel(
+      aes(x = X1, y = X2, label = vertex_names, color = hub),
+      box.padding = unit(1, "lines"),
+      data = ~ subset(.x, vertex_names %in% int_hubs)
+    ) +
+    labs(title = "KEGG network") +
+    network_theme
+  
+  return(pl)
+}
+
 
 plot_deg_interaction <- function(ig_obj, n = 10, color = "blue", name, degs_by_comparison) {
   degrees <- igraph::degree(ig_obj, normalized = FALSE)
