@@ -3,6 +3,78 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_survival_plot <- function(long_df, time_var, event_var) {
+  # 1. Create the survival object
+  survival_object <- Surv(time = long_df[[time_var]], event = long_df[[event_var]])
+  
+  # 2. Fit the Kaplan-Meier model
+  survival_fit <- survfit(survival_object ~ treatment, data = long_df)
+  
+  # 3. Extract survival probabilities and confidence intervals
+  survival_data <- surv_summary(survival_fit, data = long_df)
+  survival_data_ci <- summary(survival_fit, conf.int = TRUE)
+  
+  # 4. Calculate proportion of healed wounds and confidence intervals
+  survival_data <- survival_data %>%
+    mutate(
+      prob = surv * 100,
+      proportion_healed = 1 - surv,
+      upper_ci = 1 - lower,
+      lower_ci = 1 - upper
+    )
+  
+  # 5. Perform log-rank test
+  logrank_test <- survdiff(survival_object ~ treatment, data = long_df)
+  
+  # 6. Create the plot
+  survival_plot <- survival_data %>%
+    ggplot(aes(x = time, y = prob, color = strata)) +
+    geom_step() +
+    geom_point(data = filter(survival_data, time %in% c(5, 10))) + # Filter data for geom_point
+    labs(x = "Time (days)", y = "Wound Persistance (%)", color = "Treatment") +
+    scale_color_manual(values = c("darkblue", "orange")) +
+    # theme_bw() +
+    theme_classic() +
+    scale_x_continuous(
+      breaks = c(0, 2, 5, 10), # Set desired x-axis breaks
+      limits = c(0, 10), # Set x-axis limits between 0 and 10
+      expand = expansion(mult = c(0, 0.01))
+    ) +
+    scale_y_continuous(
+      breaks = c(0, 50, 100),
+      limits = c(0, 100), # Set y-axis limits between 0 and 1
+      expand = expansion(mult = c(0, 0))
+    ) +
+    annotate("text",
+             x = 5, y = 20,
+             # label = paste("Log rank ", "P", " = ", round(logrank_test$pvalue, 2)),
+             label = bquote(paste("Log rank ", italic(P), " = ", .(round(logrank_test$pvalue, 2)))),  # Add .( ... ) around the p-value
+             # label = paste(bquote(paste("Log rank ", italic(P), " = ")), round(logrank_test$pvalue, 2)),  # Use expression()
+             size = 7.5
+    ) +
+    ggeasy::easy_text_size(size = 20) +
+    theme(legend.position = "top") +
+    guides(
+      color = guide_legend(title.position = "left"),
+      override.aes = list(shape = c(15, 16)) # 15 = square, 16 = circle +
+    ) +
+    
+    # Add this to remove all grid lines except the major ones on the y-axis
+    theme(
+      plot.background = element_blank(),
+      panel.background = element_blank(),
+      panel.grid.major.x = element_blank(), # Remove vertical grid lines
+      panel.grid.minor = element_blank(), # Remove minor grid lines
+      panel.grid.major.y = element_line(
+        color = "grey", # Set the color of the line
+        linetype = "solid" # You can change this to "dashed" or other linetypes if needed
+      )
+    ) +
+    theme(axis.line = element_line(colour = "black"))
+  
+  return(survival_plot)
+}
+
 combine_gsea_results <- function(gsea_results_list, comparison_names, cluster_labels) {
   # Combine GSEA results into a compareClusterResult object
   
