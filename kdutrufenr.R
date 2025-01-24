@@ -3,6 +3,175 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+chemo_div_plot <- function(
+    comp_dis_mat = NULL, div_data = NULL, div_prof_data = NULL,
+    samp_dis_mat = NULL, group_data = NULL) {
+  
+  library(ggplot2)
+  library(patchwork)
+  
+  all_plots <- list()
+  if (is.data.frame(group_data)) {
+    group_data <- as.vector(group_data[, 1])
+  }
+  if (!is.null(comp_dis_mat)) {
+    comp_dis_mat_clust <- stats::hclust(stats::as.dist(comp_dis_mat),
+      method = "average"
+    )
+    comp_dis_mat_clust_dend <- stats::as.dendrogram(comp_dis_mat_clust)
+    comp_dis_mat_clust_dend_data <- ggdendro::dendro_data(comp_dis_mat_clust_dend)
+    
+    comp_dis_mat_tree_plot <- ggplot() +
+      geom_segment(
+        data = comp_dis_mat_clust_dend_data$segments,
+        aes(x = x, y = y, xend = xend, yend = yend)
+      ) +
+      theme_bw() +
+      geom_text(
+        data = comp_dis_mat_clust_dend_data$labels,
+        aes(x = x, y = y, label = label),
+        hjust = -0.1, angle = 0,
+        size = 3  # Add this line to decrease text size
+      ) +
+      scale_y_reverse(limits = c(1, -0.5), breaks = c(1, 0.75, 0.5, 0.25, 0)) +
+      ylab("Dissimilarity") +
+      ggtitle("") +
+      theme(
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(), 
+        panel.background = element_blank(),
+        axis.line.x = element_line(color = "black", size = 0.5)
+      ) +
+      coord_flip()
+    
+    all_plots[["comp_dis_mat_tree_plot"]] <- comp_dis_mat_tree_plot
+  }
+  if (!is.null(div_data)) {
+    div_data_df <- as.data.frame(div_data)
+    if (is.null(group_data)) {
+      message("No grouping data provided.")
+      group_data <- rep("NoGroup", nrow(div_data_df))
+    }
+    
+    div_data_df$group <- group_data
+    
+    for (i in 1:(ncol(div_data_df) - 1)) {
+      all_plots[[paste0("div_plot", colnames(div_data_df)[i])]] <- local({
+        i <- i
+        current_col <- colnames(div_data_df)[i]
+        div_plot <- div_data_df %>% 
+          ggplot(aes(x = group, y = .data[[current_col]], fill = group)) +
+          geom_boxplot(outlier.shape = NA) +
+          geom_jitter(height = 0, width = 0.1, shape = 21) +
+          theme_bw() +
+          labs(x = "", y = "Functional Hill Diversity", fill = "Season") +
+          theme(
+            text = element_text(size = 15),
+            legend.position = "none"
+          )
+      })
+    }
+  }
+  if (!is.null(div_prof_data)) {
+    if (is.null(group_data)) {
+      message("No grouping data provided.")
+      group_data <- rep("NoGroup", nrow(div_prof_data$divProf))
+    }
+    div_prof <- div_prof_data$divProf
+    div_prof_mean1 <- stats::aggregate(div_prof,
+      by = list(group = group_data),
+      mean, na.rm = TRUE
+    )
+    div_prof_mean2 <- as.data.frame(t(div_prof_mean1[, 2:ncol(div_prof_mean1)]))
+    colnames(div_prof_mean2) <- div_prof_mean1$group
+    q_all <- seq(
+      from = div_prof_data$qMin, to = div_prof_data$qMax,
+      by = div_prof_data$step
+    )
+    div_prof_mean2$q <- q_all
+    div_hill_long <- tidyr::pivot_longer(div_prof_mean2, 1:(ncol(div_prof_mean2) -
+      1), names_to = "group", values_to = "diversity")
+    div_prof_ind <- as.data.frame(t(div_prof))
+    div_prof_ind$q <- q_all
+    div_hill_long_ind <- tidyr::pivot_longer(div_prof_ind, 1:(ncol(div_prof_ind) -
+      1), names_to = "individual", values_to = "diversity")
+    div_hill_long_ind$group <- rep(group_data, length(unique(div_prof_ind$q)))
+    div_prof_plot <- ggplot() +
+      geom_line(
+        data = div_hill_long_ind,
+        aes(x = q, y = diversity, group = individual, color = group), 
+        linewidth = 0.5, alpha = 0.15
+      ) +
+      theme_bw() +
+      geom_line(data = div_hill_long, 
+                aes(x = q, y = diversity, color = group), 
+                linewidth = 2
+                ) +
+      labs(x = "Diversity order (q)", y = "Functional Hill Diversity", color = "Season") +
+      theme(text = element_text(size = 15))
+    all_plots[["div_prof_plot"]] <- div_prof_plot
+  }
+  if (!is.null(samp_dis_mat)) {
+    if (is.null(group_data)) {
+      message("No grouping data provided.")
+      if (is.matrix(samp_dis_mat)) {
+        group_data <- rep("NoGroup", nrow(samp_dis_mat))
+      } else {
+        group_data <- rep("NoGroup", nrow(samp_dis_mat[[1]]))
+      }
+    }
+    if (is.matrix(samp_dis_mat)) {
+      utils::capture.output(nmds <- vegan::metaMDS(samp_dis_mat,
+        autotransform = FALSE
+      ))
+      nmds_coords <- as.data.frame(nmds$points)
+      nmds_coords$group <- group_data
+      nmds_plot <- nmds_coords %>% 
+        ggplot(aes(x = MDS1, y = MDS2, color = group)) +
+        theme_bw() +
+        geom_point(size = 4, alpha = 0.5) +
+        labs(color = "Season") +
+        theme(text = element_text(size = 15))
+      all_plots[["nmds_plot"]] <- nmds_plot
+    } else {
+      utils::capture.output(bc_nmds <- vegan::metaMDS(samp_dis_mat$bray_curtis,
+        autotransform = FALSE
+      ))
+      bc_nmds_coords <- as.data.frame(bc_nmds$points)
+      bc_nmds_coords$group <- group_data
+      bc_nmds_plot <- bc_nmds_coords %>% 
+        ggplot(aes(x = MDS1, y = MDS2, color = group)) +
+        theme_bw() +
+        geom_point(size = 4, alpha = 0.5) +
+        theme(text = element_text(size = 15)) +
+        ggtitle("Bray-Curtis NMDS")
+      all_plots[["bc_nmds_plot"]] <- bc_nmds_plot
+      utils::capture.output(gu_nmds <- vegan::metaMDS(samp_dis_mat$gen_uni_frac,
+        autotransform = FALSE
+      ))
+      gu_nmds_coords <- as.data.frame(gu_nmds$points)
+      gu_nmds_coords$group <- group_data
+      gu_nmds_plot <- gu_nmds_coords %>% 
+        ggplot(aes(x = MDS1, y = MDS2, color = group)) +
+        theme_bw() +
+        geom_point(size = 4, alpha = 0.5) +
+        theme(text = element_text(size = 15)) +
+        ggtitle("Generalized UniFrac NMDS")
+      all_plots[["gu_nmds_plot"]] <- gu_nmds_plot
+    }
+  }
+  
+  compound_figure <- (all_plots$comp_dis_mat_tree_plot | (all_plots$div_plotFuncHillDiv / all_plots$nmds_plot / all_plots$div_prof_plot) ) + plot_layout(width = c(3, 1))
+  
+  return(compound_figure)
+  
+  # return(gridExtra::grid.arrange(grobs = all_plots, ncol = ceiling(sqrt(length(all_plots)))))
+}
+
 create_survival_plot <- function(long_df, time_var, event_var) {
   # 1. Create the survival object
   survival_object <- Surv(time = long_df[[time_var]], event = long_df[[event_var]])
