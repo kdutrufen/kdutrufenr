@@ -3,6 +3,314 @@ library(CEMiTool)
 library(WGCNA)
 library(parallelMap)
 
+create_gene_tpm_trajectory_dataframe <- function(sce, gene_v) {
+  # Input validation
+  if (!is(sce, "SingleCellExperiment")) {
+    stop("Input 'sce' must be a SingleCellExperiment object.")
+  }
+  if (!is.character(gene_v) || !all(nzchar(gene_v))) {
+    stop("Input 'gene_v' must be a character vector of gene names.")
+  }
+  if (is.null(sce$pseudo_paths)) {
+    stop("Input 'sce' does not contain a 'pseudo_paths' slot.")
+  }
+  if (!all(gene_v %in% rownames(sce))) {
+    missing_genes <- gene_v[!gene_v %in% rownames(sce)]
+    warning(paste("The following genes are not found in 'sce':", paste(missing_genes, collapse = ", ")))
+    gene_v <- gene_v[gene_v %in% rownames(sce)]
+  }
+  
+  # gene_v <- gene_v %>%
+  #   intersect(row.names(sce)) %>%
+  #   sort() %>%
+  #   unique()
+
+  # Calculate TPM values
+  # sce@assays@data$tpm <- log2(cpm(sce@assays@data$counts) / 10 + 1) %>% as(Class = "dgCMatrix")
+  sce@assays@data$tpm <- (sce@assays@data$counts %>% edgeR::cpm() %>% "/"(10)) %>% "+"(1) %>% log2() %>% as(Class = "dgCMatrix")
+
+  # Extract and pre-process pseudotime data
+  pseudo_paths <- sce$pseudo_paths
+  n_lineages <- pseudo_paths %>% ncol()
+  average_pseudo_time <- pseudo_paths %>% rowMeans(na.rm = TRUE)
+
+  # Create lineage specific pseudotime list
+  lineage_pseudo_time_list <- purrr::map(seq_len(n_lineages), function(i) pseudo_paths[, i]) %>% purrr::set_names(paste0("lineage_", 1:n_lineages))
+
+  # Long format TPM data function (helper)
+  to_long_tpm <- function(tpm_matrix, pseudo_time) {
+    tpm_matrix[rownames(tpm_matrix) %in% gene_v, ] %>%
+      t() %>%
+      as.data.frame() %>%
+      rownames_to_column(var = "cell") %>%
+      mutate(pseudo_time = pseudo_time) %>%
+      drop_na(pseudo_time) %>%
+      arrange(pseudo_time) %>%
+      dplyr::select(-pseudo_time) %>%
+      column_to_rownames(var = "cell") %>%
+      t() %>%
+      as.data.frame()
+  }
+
+  # Create lineage specific pseudotime dataframes
+  lineage_pseudo_list <- lineage_pseudo_time_list %>% purrr::map(to_long_tpm, tpm_matrix = sce@assays@data$tpm)
+
+  lineage_pseudo_list$average_pseudo <- to_long_tpm(sce@assays@data$tpm, average_pseudo_time)
+
+  return(lineage_pseudo_list)
+}
+
+
+plot_dendro_heatmap_for_paper <- function(df) {
+  library(ggdendro)
+  library(tidyverse)
+  
+  cell_names <- names(df)
+  
+  # Calculate the dendrogram
+  dend <- df %>%
+      as.matrix() %>%
+    dist() %>%
+    hclust() %>%
+    as.dendrogram()
+  
+   dend_data <- dend %>% dendro_data()
+
+  # Setup the data, so that the layout is inverted (this is more
+  # "clear" than simply using coord_flip())
+  segment_data <- with(
+    segment(dend_data),
+    data.frame(x = y, y = x, xend = yend, yend = xend)
+  )
+
+  # Use the dendrogram label data to position the gene labels
+  gene_pos_table <- with(
+    dend_data$labels,
+    data.frame(y_center = x, gene = as.character(label), height = 1)
+  )
+
+  # Table to position the samples
+  cell_pos_table <- data.frame(cell = cell_names) %>%
+    mutate(x_center = (1:nrow(.)), width = 1)
+  
+  # Neglecting the gap parameters
+  heatmap_data <- df %>%
+    t() %>% 
+    as.data.frame() %>% 
+    rownames_to_column(var = "cell") %>% 
+    pivot_longer(cols = names(.)[2]:names(.)[ncol(.)], names_to = "gene", values_to = "tpm") %>% 
+    left_join(gene_pos_table) %>%
+    left_join(cell_pos_table)
+
+  # Limits for the vertical axes
+  gene_axis_limits <- with(
+    gene_pos_table,
+    c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+  ) +
+    0.1 * c(-1, 1) # extra spacing: 0.1
+  
+  max_expr <- ceiling(max(heatmap_data$tpm))
+  
+  # Heatmap plot
+  plt_hmap <- heatmap_data %>% 
+    ggplot(aes(x = x_center, y = y_center, fill = tpm, height = height, width = width)) +
+    geom_tile() +
+    # scale_fill_gradient2("Expr", high = "red", low = "blue") +
+    scale_fill_gradientn(name = "log2(TPM/10 + 1)",
+                         limits = c(0, max_expr),
+                         colours = colorRampPalette(colors = c("gainsboro", "floralwhite", "yellow", "orange", "red", "darkred"))(50)) +
+                         # colours = colorRampPalette(colors = c("blue", "gray", "yellow", "orange", "red", "darkred"))(50)) +
+                         # colours = colorRampPalette(colors = c("steelblue1", "yellow", "orangered"))(50)) +
+                         # colours = rev(colorRampPalette(colors = RColorBrewer::brewer.pal(n = 5, name = "RdYlBu"))(50))) +
+    scale_x_continuous(
+      breaks = cell_pos_table$x_center,
+      labels = cell_pos_table$cell,
+      expand = c(0, 0)
+    ) +
+    # For the y axis, alternatively set the labels as: gene_position_table$gene
+    scale_y_continuous(
+      breaks = gene_pos_table[, "y_center"],
+      # labels = rep("", nrow(gene_pos_table)),
+      labels = heatmap_data %>% arrange(y_center) %>% .[["gene"]] %>% unique(),
+      limits = gene_axis_limits,
+      expand = c(0, 0),
+      position = "right"
+    ) +
+    labs(x = "", y = "") +
+    theme_bw() +
+    theme(legend.position = "bottom") +
+    theme(
+      axis.text.x = element_blank(),
+      axis.ticks.y = element_blank(),
+      # margin: top, right, bottom, and left
+      plot.margin = unit(c(1, 0.2, 0.2, -0.7), "cm")
+      # panel.grid.minor = element_blank()
+    ) +
+  guides(fill = guide_colorbar(title.position = "top")) # Move title to the top of the legend
+
+  # Dendrogram plot
+  plt_dendr <- segment_data %>% 
+    ggplot() +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
+    scale_x_reverse(expand = c(0, 0.5)) +
+    scale_y_continuous(
+      breaks = gene_pos_table$y_center,
+      # labels = gene_pos_table$Gene,
+      labels = NULL,
+      limits = gene_axis_limits,
+      expand = c(0, 0)
+    ) +
+    labs(x = "Distance", y = "", colour = "", size = "") +
+    theme(panel.grid.minor = element_blank()) +
+    theme_void() 
+  
+  # plot_grid(plt_dendr, plt_hmap, align = "h", rel_widths = c(0.4, 1))
+  figure_list <- list(plt_dendr = plt_dendr,
+                   plt_hmap = plt_hmap,
+                  heatmap_cell_order = cell_pos_table) # Add the cell order to the returned list
+
+}
+
+plot_lineage_trajectories <- function(sce, lineage_column = "Lineage1", color_by = "cell_type", cell_order = NULL) {
+  sc_info_df <- data.frame(
+    cell_type = sce$cell_type,
+    cell_type_color = sce$cell_type_colors,
+    batch = as.character(sce$batch),
+    cell = colnames(sce)
+  ) %>%
+    cbind(sce$pseudo_paths)
+
+  # Extract relevant data
+  pseudo_paths_df <- sc_info_df %>%
+    rowwise() %>%
+    mutate(average = mean(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+    dplyr::select(cell, lineage_column, cell_type, cell_type_color, batch) %>%
+    drop_na(!!sym(lineage_column)) %>%
+    arrange(!!sym(lineage_column))
+
+  pseudo_paths_df <- pseudo_paths_df %>%
+    mutate(x_center = 1:nrow(.))
+  
+  # *** KEY CHANGE: Name the color vector ***
+  names(pseudo_paths_df$cell_type_color) <- pseudo_paths_df$cell_type  # Names are cell types
+
+    # *** KEY CHANGE: Apply cell order if provided ***
+  if (!is.null(cell_order)) {
+    pseudo_paths_df <- pseudo_paths_df %>%
+      mutate(original_x_center = x_center) %>% # Keep track of original order
+      arrange(factor(cell, levels = cell_order)) %>%  # Reorder cells
+      mutate(x_center = 1:nrow(.)) # Update x_center
+  }
+  
+  # Create plot
+  plot <- pseudo_paths_df %>%
+    ggplot(aes(x = x_center, y = 1, fill = !!sym(color_by))) +
+    geom_tile() +
+    theme_void() +
+    scale_x_continuous(
+      breaks = pseudo_paths_df$x_center,
+      expand = c(0, 0)) + # Set limits explicitly
+    # labs(x = NULL, y = NULL, fill = color_by) +
+    theme(legend.position = "bottom") +
+    guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
+
+  # Apply color palette based on color_by variable
+  if (color_by == "cell_type") {
+    plot <- plot +
+      scale_fill_manual(values = pseudo_paths_df$cell_type_color) +
+      labs(x = NULL, y = NULL, fill = "Cell types") +
+      guides(fill = guide_legend(
+        override.aes = list(size = 3), # Adjust legend key size
+        nrow = 2,
+        label.theme = element_text(margin = margin(r = 20)), # Add right margin to labels
+        label.position = "right",
+        title.position = "top", # Position title at the top
+        title.hjust = 0.5,
+        keywidth = unit(0.8, "cm")
+      ))
+  } else if (color_by == "batch") {
+    # Add logic for batch coloring if needed
+    plot <- plot +
+      scale_fill_manual(values = RColorBrewer::brewer.pal(n = length(unique(pseudo_paths_df$batch)), name = "Set1")) +
+      labs(x = NULL, y = NULL, fill = "Embryonic stage")
+  } else if (color_by == "pseudotime") {
+    # Add logic for batch coloring if needed
+    plot <- pseudo_paths_df %>%
+      ggplot(aes(x = x_center, y = 1, fill = as.numeric(!!sym(lineage_column)))) +
+      geom_tile() +
+      theme_void() +
+      scale_x_continuous(
+      breaks = pseudo_paths_df$x_center,
+      expand = c(0, 0)) + # Set limits explicitly
+      theme(legend.position = "bottom") +
+      guides(fill = guide_legend(title.position = "top", title.hjust = 0.5)) +
+      scale_fill_viridis(option = "viridis") +
+      labs(x = NULL, y = NULL, fill = paste("Pseudotime", lineage_column)) +
+      guides(fill = guide_colorbar(title.position = "top", label.position = "bottom"))  # Set legend title and position
+  }
+}
+
+plot_lineage_trajectory_figure <- function(sce, lineage_column = "Lineage1", genes_of_interest = NULL) {
+  
+  new_lineage_column <- lineage_column %>% str_to_lower() %>% str_replace(pattern = "ge", replacement = "ge_")
+  
+  trajectory_df_list <- create_gene_tpm_trajectory_dataframe(sce = sce, gene_v = genes_of_interest)
+  
+  # 1. Prepare Heatmap and Dendrogram
+  if (new_lineage_column %in% names(trajectory_df_list)) {
+    dendro_heatmap_data <- plot_dendro_heatmap_for_paper(trajectory_df_list[[new_lineage_column]])
+    dendro <- dendro_heatmap_data$plt_dendr
+    heatmap <- dendro_heatmap_data$plt_hmap + theme(legend.position = "none") # Remove heatmap legend here
+
+    # Get the cell order from the heat map
+    heatmap_cell_order <- dendro_heatmap_data$heatmap_cell_order$cell
+    
+    # Get x-axis limits from heatmap
+    x_limits <- layer_scales(dendro_heatmap_data$plt_hmap)$x$range$range
+    
+    # Create trajectory plots
+    cell_type_plot <- plot_lineage_trajectories(sce = sce, 
+                                                lineage_column = lineage_column, 
+                                                color_by = "cell_type", 
+                                                cell_order = heatmap_cell_order)
+    
+  batch_plot <- plot_lineage_trajectories(sce = sce, 
+                                          lineage_column = lineage_column, 
+                                          color_by = "batch", 
+                                          cell_order = heatmap_cell_order)
+  
+  sling_plot <- plot_lineage_trajectories(sce = sce, 
+                                          lineage_column = lineage_column, 
+                                          color_by = "pseudotime", 
+                                          cell_order = heatmap_cell_order)
+
+    # Extract legends
+    dendro_legend <- get_legend(dendro_heatmap_data$plt_hmap)
+    cell_type_legend <- get_legend(cell_type_plot)
+    batch_legend <- get_legend(batch_plot)
+    sling_legend <- get_legend(sling_plot)
+
+     # Remove legends from individual plots
+    cell_type_plot <- cell_type_plot + theme(legend.position = "none")
+    batch_plot <- batch_plot + theme(legend.position = "none")
+    sling_plot <- sling_plot + theme(legend.position = "none")
+
+    # Create combined figure
+    figure <- heatmap %>%
+      insert_top(plot = sling_plot, height = 1/20) %>%
+      insert_top(plot = batch_plot, height = 1/20) %>%
+      insert_top(plot = cell_type_plot, height = 1/20) %>%
+      insert_left(plot = dendro, width = 1/10)
+
+    figure_legend <- ggdraw(cell_type_legend) /
+      (ggdraw(dendro_legend) | ggdraw(batch_legend) | ggdraw(sling_legend))
+
+    return(as.ggplot(figure) / figure_legend)
+  } else {
+    stop(paste0(lineage_column, "' not found in the data."))
+  }
+} 
+                                         
 chemo_div_plot <- function(
     comp_dis_mat = NULL, div_data = NULL, div_prof_data = NULL,
     samp_dis_mat = NULL, group_data = NULL) {
